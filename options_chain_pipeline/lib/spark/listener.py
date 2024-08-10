@@ -1,5 +1,5 @@
+#!/usr/bin/env python3
 import json
-
 
 from pyspark.streaming import StreamingListener  # noqa
 from pyspark.status import SparkJobInfo, SparkStageInfo, StatusTracker  # noqa
@@ -16,9 +16,7 @@ from pyspark.sql.streaming.listener import (  # noqa
     StreamingQueryProgress,
 )
 
-from daily.utils.logging import get_logger
-
-# logger = get_logger(__name__, level="DEBUG", ch=True, fh=True)
+from options_chain_pipeline.lib.utils.logging import get_logger
 
 
 class MyListener(StreamingQueryListener):
@@ -71,52 +69,7 @@ class MyListener(StreamingQueryListener):
                 indent=4,
             )
         )
-
-        # try:
-        #     row = event.progress.observedMetrics.get("metric")
-        #     if row is not None:
-        #         if row.malformed / row.cnt > 0.5:
-        #             print(
-        #                 "ALERT! Ouch! there are too many malformed "
-        #                 f"records {row.malformed} out of {row.cnt}!"
-        #             )
-        #         else:
-        #             print(f"{row.cnt} rows processed!")
-        #     self.logger.info(
-        #         f"Query made progress: id={event.progress.id}, runId={event.progress.runId}"
-        #     )
-        #     self.logger.info(
-        #         f"BatchId: {event.progress.batchId}, Timestamp: {event.progress.timestamp}"
-        #     )
-        #     # self.logger.info(f"Sources: {event.progress.sources}")
-        #     for src in event.progress.sources:
-        #         self.logger.info(f"Description: {src.description}")
-        #         self.logger.info(f"Start offset: {src.startOffset}")
-        #         self.logger.info(f"End offset: {src.endOffset}")
-        #         self.logger.info(f"Latest offset: {src.latestOffset}")
-        #         self.logger.info(f"Input rows: {src.numInputRows}")
-        #         self.logger.info(f"Input rows/s: {src.inputRowsPerSecond}")
-        #         self.logger.info(f"Processed rows/s: {src.processedRowsPerSecond}")
-        #         self.logger.info(f"Metrics: {src.metrics}")
-
-        #     self.logger.info(f"Sink: {event.progress.sink.json}")
-        #     self.logger.info(f"Input rows: {event.progress.numInputRows}")
-        #     self.logger.info(f"Progress batch duration: {event.progress.batchDuration}")
-        #     self.logger.info(f"Progress batch id: {event.progress.batchId}")
-        #     # for source in event.progress.sources:
-        #     #     self.logger.info(
-        #     #         f"Source: {source.description}, Input Rows: {source.numInputRows}"
-        #     #     )
-        #     for state_operator in event.progress.stateOperators:
-        #         self.logger.info(
-        #             f"State Operator: {state_operator.operatorName}, Num Rows Updated: {state_operator.numRowsUpdated}"
-        #         )
-        # except Exception as e:
-        #     self.logger.error(
-        #         "`MyListener.onQueryProgress` failed to report `QueryProgressEvent`",
-        #         exc_info=e,
-        #     )
-
+        
     def onQueryIdle(self, event: QueryIdleEvent):
         try:
             self.logger.info(
