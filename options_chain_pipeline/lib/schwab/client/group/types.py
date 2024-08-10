@@ -1,10 +1,11 @@
+#!/usr/bin/env python3
 from typing import Optional
 from typing import TYPE_CHECKING
 from typing import TypedDict
 
 if TYPE_CHECKING:
     import datetime as dt
-    from daily.schwab.client import SchwabClient
+    from ...client import SchwabClient
 
 
 class ProjectedSchedule(TypedDict):
