@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 # Adapted from https://github.com/areed1192/td-ameritrade-python-api by Alex Reed
 import asyncio
 import datetime as dt
