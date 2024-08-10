@@ -3,12 +3,12 @@ from contextlib import contextmanager
 from typing import Generator
 from typing import Optional
 
-from daily.sql.mssql.client import MSSQLClient
-from daily.sql.mssql.config import MSSQLConfig
-from daily.sql.mssql.protocols import HasConfiguredConnectionString
-from daily.utils.logging import get_logger
+from options_chain_pipeline.lib.mssql import MSSQLClient
+from options_chain_pipeline.lib.mssql import MSSQLConfig
+from options_chain_pipeline.lib.mssql.protocols import HasConfiguredConnectionString
+from options_chain_pipeline.lib.utils.logging import get_logger
 
-logger = get_logger("daily.sql.mssql.functions", level="DEBUG", ch=True)
+logger = get_logger("options_chain_pipeline.lib.mssql.functions", level="DEBUG", ch=True)
 
 GLOBAL_CONFIG: HasConfiguredConnectionString = MSSQLConfig
 MAX_CAPACITY: Optional[int] = None
