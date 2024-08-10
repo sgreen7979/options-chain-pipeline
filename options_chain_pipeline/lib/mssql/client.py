@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+from abc import ABC
+from abc import abstractmethod
 import datetime
 from enum import IntEnum
 import json
@@ -15,18 +17,53 @@ from typing import Tuple
 import pandas as pd
 import pyodbc
 
-from daily.env import DATA_PATH
-from daily.env import SSH_PASSWORD
-from daily.env import SSH_SERVER
-from daily.env import SSH_USER
-from daily.sql.client.abstract import AbstractSqlClient
-from daily.sql.mssql.bulk_insert import prepare_bulk_insert_query
-from daily.sql.mssql.connection_string import ConnString
-from daily.sql.mssql.utils import LocalTempHandler
-from daily.sql.mssql.utils import RemoteTempHandler
-from daily.utils.logging import get_logger
+from options_chain_pipeline.lib.env import DATA_PATH
+from options_chain_pipeline.lib.env import SSH_PASSWORD
+from options_chain_pipeline.lib.env import SSH_SERVER
+from options_chain_pipeline.lib.env import SSH_USER
+from options_chain_pipeline.lib.utils.logging import get_logger
+
+from .bulk_insert import prepare_bulk_insert_query
+from .connection_string import ConnString
+from .utils import LocalTempHandler
+from .utils import RemoteTempHandler
+from .protocols import Connection as ConnectionProto
 
 logger = get_logger("MSSQLClient", level=logging.DEBUG, propagate=False, fh=True)
+
+
+class AbstractSqlClient(ABC):
+
+    def __init__(self) -> None:
+        super().__init__()
+
+    @abstractmethod
+    def connect(self): ...
+
+    @property
+    def conn(self) -> ConnectionProto:
+        if not hasattr(self, "_conn"):
+            self.connect()
+        return self._conn
+
+    def __enter__(self): ...
+
+    def __exit__(self, exc_type, exc_val, exc_tb): ...
+
+    @conn.setter
+    def conn(self, conn):
+        self._conn = conn
+
+    @abstractmethod
+    def execute(self, *args, **kwargs): ...
+
+    @abstractmethod
+    def scalar(self, *args, **kwargs): ...
+
+    @classmethod
+    @abstractmethod
+    def from_url(cls, url): ...
+
 
 
 class MSSQLClient(AbstractSqlClient):
@@ -80,13 +117,6 @@ class MSSQLClient(AbstractSqlClient):
         local_backup_path = f"{DATA_PATH}/bulk_insert_debug/{today}"
 
         if self.is_remote:
-            # return RemoteTempHandler(
-            #     os.environ["SQL_PRIMARY_SERVER"],
-            #     os.environ["SQL_PRIMARY_SERVER_USERNAME"],
-            #     os.environ["SQL_PRIMARY_SERVER_PASSWORD"],
-            #     local_backup_path,
-            #     "D:\\test_bulk_insert",
-            # )
             assert isinstance(SSH_SERVER, str)
             assert isinstance(SSH_USER, str)
             assert isinstance(SSH_PASSWORD, str)
@@ -164,13 +194,6 @@ class MSSQLClient(AbstractSqlClient):
     @property
     def conn_str(self) -> str:
         return self._cstring_obj.value()
-
-    # def connect(self) -> None:
-    #     if not self.connected:
-    #         self.conn = pyodbc.connect(self.conn_str, autocommit=self.autocommit)
-    #         assert isinstance(self.conn, pyodbc.Connection) and not getattr(
-    #             self.conn, "closed"
-    #         ), "Failed to connect"
 
     def connect(self) -> None:
         if not self.connected:
@@ -437,75 +460,3 @@ class MSSQLClient(AbstractSqlClient):
             ),
             autocommit=autocommit,
         )
-
-    class AttrsBefore(IntEnum):
-        """The dictionary keys must be the integer constants defined
-        by ODBC or the driver. The dictionary values can be integers,
-        bytes, bytearrays, or strings.
-
-        Below is an example that sets the SQL_ATTR_PACKET_SIZE
-        connection attribute to 32K:
-
-            ```python
-            SQL_ATTR_PACKET_SIZE = 112
-            cnxn = pyodbc.connect(cstring,
-                        attrs_before={ SQL_ATTR_PACKET_SIZE : 1024 * 32 })
-            ```
-        """
-
-        # fmt: off
-        SQL_ATTR_CONNECTION_POOLING_OFF =               0
-        SQL_ATTR_CONNECTION_POOLING_ONE_PER_HENV =      1
-        SQL_ATTR_CONNECTION_POOLING_ONE_PER_DRIVER =    2
-        SQL_ATTR_CONNECTION_POOLING_ONE_PER_DB =        3
-        SQL_ATTR_ACCESS_MODE =                          101
-        SQL_ATTR_AUTOCOMMIT =                           102
-        SQL_ATTR_LOGIN_TIMEOUT =                        103
-        SQL_ATTR_TRACE =                                104
-        SQL_ATTR_TRACEFILE =                            105
-        SQL_ATTR_TRANSLATE_LIB =                        106
-        SQL_ATTR_TRANSLATE_OPTION =                     107
-        SQL_ATTR_TXN_ISOLATION =                        108
-        SQL_ATTR_CURRENT_CATALOG =                      109
-        SQL_ATTR_ODBC_CURSORS =                         110
-        SQL_ATTR_METADATA_ID =                          111
-        SQL_ATTR_PACKET_SIZE =                          112
-        SQL_ATTR_CONNECTION_TIMEOUT =                   113
-        SQL_ATTR_ASYNC_DBC_FUNCTIONS_ENABLE =           117
-        SQL_ATTR_ASYNC_DBC_EVENT =                      124
-        SQL_ATTR_ASYNC_DBC_PCALLBACK =                  125
-        SQL_ATTR_ASYNC_DBC_HANDLE =                     126
-        SQL_ATTR_ASYNC_DBC_CONTEXT =                    127
-        SQL_ATTR_ASYNC_DBC_COMPLETE =                   128
-        SQL_ATTR_CONNECTION_POOLING =                   201
-        SQL_ATTR_QUIET_MODE =                           1113
-        SQL_ATTR_RESET_CONNECTION =                     1160
-        SQL_ATTR_DBC_INFO_TOKEN =                       1190
-        SQL_ATTR_ENLIST_IN_DTC =                        1207
-        SQL_ATTR_ENLIST_IN_XA =                         1208
-        SQL_ATTR_APPLICATION_KEY =                      1191
-        SQL_ATTR_DBC_PROFILE =                          1192
-        SQL_ATTR_DBC_PROFILE_GROUP =                    1193
-        SQL_ATTR_CONNECTION_DEAD =                      1209
-        SQL_COPT_SS_ACCESS_TOKEN =                      1256
-        # fmt: on
-
-        @classmethod
-        def get_attr_codes(cls) -> List[Tuple[str, int]]:
-            def fmt(line):
-                lsplit = line.split()
-                return (lsplit[0], int(lsplit[1]))
-
-            with open("./attrs_bef.txt", "r") as f:
-                data = list(map(fmt, f.readlines()))
-            return data
-
-        # SQL_ACCESSIBLE_PROCEDURES = 20
-        # SQL_ACCESSIBLE_TABLES = 19
-        # SQL_ACTIVE_CONNECTIONS = 0
-        # SQL_ACTIVE_ENVIRONMENTS = 116
-        # SQL_ACTIVE_STATEMENTS = 1
-        # SQL_AGGREGATE_FUNCTIONS = 169
-        # SQL_ATTR_ASYNC_DBC_PCONTEXT = "SQL_ATTR_ASYNC_DBC_PCONTEXT"
-        # SQL_ATTR_ASYNC_ENABLE = "SQL_ATTR_ASYNC_ENABLE"
-        # SQL_ATTR_AUTO_IPD = "SQL_ATTR_AUTO_IPD"
