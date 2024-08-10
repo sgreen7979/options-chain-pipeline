@@ -8,26 +8,25 @@ import gzip
 import json
 import sys
 import time
-from typing import (
-    Any,
-    Callable,
-    Coroutine,
-    Dict,
-    List,
-    Optional,
-    Tuple,
-    TYPE_CHECKING,
-    Union,
-)
+from typing import Any
+from typing import Callable
+from typing import Coroutine
+from typing import Dict
+from typing import List
+from typing import Optional
+from typing import Tuple
+from typing import TYPE_CHECKING
+from typing import Union
 
 from options_chain_pipeline.lib.fundamental.loader import FundamentalsLoader
 from options_chain_pipeline.lib.market_hrs import functions as mh
-from options_chain_pipeline.lib.schwab.base_producer import BaseKafkaProducer
 from options_chain_pipeline.lib.schwab.exceptions import ReadTimeoutError
 from options_chain_pipeline.lib.schwab.exceptions import UnexpectedTokenAuthError
 from options_chain_pipeline.lib.schwab.option_chain import OptionChain as OptionsChainParams
 from options_chain_pipeline.lib.symbols import get_options_universe
 from options_chain_pipeline.lib.utils.logging import get_logger
+
+from .base_producer import BaseKafkaProducer
 
 if TYPE_CHECKING:
     from daily.schwab.client import SchwabClient
