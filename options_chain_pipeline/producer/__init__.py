@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING
 from typing import Union
 
 from options_chain_pipeline.lib.fundamental.loader import FundamentalsLoader
-from options_chain_pipeline.lib.market_hrs import functions as mh
+from options_chain_pipeline.lib.market_hours import functions as mh
 from options_chain_pipeline.lib.schwab.exceptions import ReadTimeoutError
 from options_chain_pipeline.lib.schwab.exceptions import UnexpectedTokenAuthError
 from options_chain_pipeline.lib.schwab.option_chain import OptionChain as OptionsChainParams
