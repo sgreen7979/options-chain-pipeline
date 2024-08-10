@@ -322,7 +322,3 @@ class ConnString:
         if self is other:
             return True
         return self.value() == other.value()
-
-
-# for legacy code still refering to `ConnString`` as `cstring``
-cstring = ConnString
