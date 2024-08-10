@@ -60,7 +60,7 @@ def get_sql_connection(
             sql_client.execute("<SQL QUERY>")
         ```
     """
-    conn_str = (config or GLOBAL_CONFIG).ConfiguredConnectionString
+    conn_str = (config or GLOBAL_CONFIG).ConnectionString
     sql_client = MSSQLClient(conn_str, autocommit=autocommit)
     # logger.info(f"Created new SQL connection and client at {hex(id(sql_client))}")
     try:
