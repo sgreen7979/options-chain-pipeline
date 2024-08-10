@@ -1,4 +1,5 @@
 import json
+from typing import Optional
 from typing import TYPE_CHECKING
 import urllib.parse
 
