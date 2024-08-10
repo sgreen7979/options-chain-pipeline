@@ -27,7 +27,6 @@ def getSchwabClientClass():
     """
     Return the class to be used when instantiating a logger.
     """
-    global SchwabClient
     return SchwabClient
 
 
