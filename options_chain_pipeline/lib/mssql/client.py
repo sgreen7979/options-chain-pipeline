@@ -157,9 +157,6 @@ class MSSQLClient(AbstractSqlClient):
     def server(self, __srv: str) -> None:
         logger.info(f"changing server to {__srv}")
         self._cstring_obj.server = __srv
-        # # TODO: handle this hear or in the ConnString class?
-        # # Reset the security params if we're changing the server
-        # self._cstring_obj._set_security_params(None, None)
 
     @property
     def uid(self) -> str:
