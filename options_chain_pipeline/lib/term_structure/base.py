@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 import datetime as dt
+from functools import lru_cache
 from typing import List
 from typing import Optional
 
 from .types import MarketDataType
-
-from functools import lru_cache
 
 
 class SimpleYieldTermStructure:
