@@ -15,15 +15,14 @@ from typing import TYPE_CHECKING
 
 from redis import Redis
 
-from daily.schwab.client import SchwabClient
-from daily.schwab.credentials.functions import get_all_credentials
-from daily.utils.logging import get_logger
-from daily.utils.singleton import StrictSingleton
+from options_chain_pipeline.lib.utils.logging import get_logger
+from options_chain_pipeline.lib.utils.singleton import StrictSingleton
+
+from ...client import SchwabClient
+from ...credentials.functions import get_all_credentials
 
 if TYPE_CHECKING:
     from daily.schwab.credentials import SchwabCredentials
-
-    # from daily.schwab.client.latest import SchwabClient as SchwabClientNew
 
 
 __all__ = ["ClientGroup"]
@@ -34,7 +33,6 @@ redis = Redis()
 
 class ClientGroup(metaclass=StrictSingleton):
     _lock: ClassVar[threading.RLock] = threading.RLock()
-    # _client_facotory: ClassVar[type["SchwabClient"]] = SchwabClient
 
     @contextmanager
     @classmethod
@@ -150,7 +148,6 @@ class ClientGroup(metaclass=StrictSingleton):
         else:
             return str(obj)
 
-    # def schedule_request(self, client: "SchwabClient", params: Dict, service: str):
     def schedule_request(
         self,
         service: str,
