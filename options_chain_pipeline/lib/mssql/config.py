@@ -6,10 +6,10 @@ from typing import Dict
 from typing import Optional
 from typing import Tuple
 
-from daily.sql.mssql.connection_string import ConnString
-from daily.utils.networking import is_local
-from daily.utils.networking import get_local_ipv4
-from daily.utils.networking import get_local_hostname
+from options_chain_pipeline.lib.mssql import ConnString
+from options_chain_pipeline.lib.networking import is_local
+from options_chain_pipeline.lib.networking import get_local_ipv4
+from options_chain_pipeline.lib.utils.networking import get_local_hostname
 
 
 class MSSQLConfig:
@@ -29,22 +29,15 @@ class MSSQLConfig:
     SQLServerPWD: ClassVar[Optional[str]] = os.getenv("SQL_PWD", None)
     SQLServerPort: ClassVar[str] = os.getenv("SQL_PORT", "1433")
 
-    ConfiguredConnectionString: ClassVar[ConnString] = ConnString(
+    ConnectionString: ClassVar[ConnString] = ConnString(
         server=PrimarySQLServer, uid=SQLServerUID, pwd=SQLServerPWD
     )
 
     JdbcConnectionProperties: ClassVar[Dict[str, str]] = {
         "user": SQLServerUID or "NONE",
         "password": SQLServerPWD or "NONE",
-        # "trustedConnection": str(ConfiguredConnectionString.trusted_conn).lower(),
-        "trustServerCertificate": str(
-            ConfiguredConnectionString.trust_server_cert
-        ).lower(),
+        "trustServerCertificate": str(ConnectionString.trust_server_cert).lower(),
         "driver": "com.microsoft.sqlserver.jdbc.SQLServerDriver",
-        # "batchsize": "500",
-        # "isolationLevel": "READ_COMMITTED",  # Ensure consistent read/write operations
-        # "isolationLevel": "NONE",  # Ensure consistent read/write operations
-        # "rewriteBatchedStatements": "true",
     }
 
     isTested: ClassVar[bool] = False
@@ -53,7 +46,7 @@ class MSSQLConfig:
     @classmethod
     def setConfiguredConnectionString(cls, connstr: ConnString):
         if connstr != cls.ConfiguredConnectionString:
-            cls.ConfiguredConnectionString = connstr
+            cls.ConnectionString = connstr
             cls.PrimarySQLServer = connstr.server
             cls.SQLServerUID = connstr.uid
             cls.SQLServerPWD = connstr.pwd
@@ -64,9 +57,7 @@ class MSSQLConfig:
                 {
                     "user": cls.SQLServerUID or "NONE",
                     "password": cls.SQLServerPWD or "NONE",
-                    "trustServerCertificate": str(
-                        cls.ConfiguredConnectionString.trust_server_cert
-                    ).lower(),
+                    "trustServerCertificate": str(connstr.trust_server_cert).lower(),
                 }
             )
 
