@@ -21,21 +21,21 @@ class MSSQLConfig:
     LocalServer: ClassVar[str] = LocalConnectionString.server
     LocalServerUID: ClassVar[str] = cast(str, LocalConnectionString.uid)
 
-    PrimarySQLServer: ClassVar[str] = os.getenv("SQL_PRIMARY_SERVER", LocalServer)
-    PrimarySQLServerIsLocal: ClassVar[bool] = is_local(PrimarySQLServer)
-    PrimarySQLServerIsRemote: ClassVar[bool] = not PrimarySQLServerIsLocal
+    PrimaryServer: ClassVar[str] = os.getenv("SQL_PRIMARY_SERVER", LocalServer)
+    PrimaryServerIsLocal: ClassVar[bool] = is_local(PrimaryServer)
+    PrimaryServerIsRemote: ClassVar[bool] = not PrimaryServerIsLocal
 
-    SQLServerUID: ClassVar[Optional[str]] = os.getenv("SQL_UID", None)
-    SQLServerPWD: ClassVar[Optional[str]] = os.getenv("SQL_PWD", None)
-    SQLServerPort: ClassVar[str] = os.getenv("SQL_PORT", "1433")
+    UID: ClassVar[Optional[str]] = os.getenv("SQL_UID", None)
+    PWD: ClassVar[Optional[str]] = os.getenv("SQL_PWD", None)
+    Port: ClassVar[str] = os.getenv("SQL_PORT", "1433")
 
     ConnectionString: ClassVar[ConnString] = ConnString(
-        server=PrimarySQLServer, uid=SQLServerUID, pwd=SQLServerPWD
+        server=PrimaryServer, uid=UID, pwd=PWD
     )
 
     JdbcConnectionProperties: ClassVar[Dict[str, str]] = {
-        "user": SQLServerUID or "NONE",
-        "password": SQLServerPWD or "NONE",
+        "user": UID or "NONE",
+        "password": PWD or "NONE",
         "trustServerCertificate": str(ConnectionString.trust_server_cert).lower(),
         "driver": "com.microsoft.sqlserver.jdbc.SQLServerDriver",
     }
@@ -47,16 +47,16 @@ class MSSQLConfig:
     def setConfiguredConnectionString(cls, connstr: ConnString):
         if connstr != cls.ConfiguredConnectionString:
             cls.ConnectionString = connstr
-            cls.PrimarySQLServer = connstr.server
-            cls.SQLServerUID = connstr.uid
-            cls.SQLServerPWD = connstr.pwd
-            cls.PrimarySQLServerIsLocal = is_local(cls.PrimarySQLServer)
-            cls.PrimarySQLServerIsRemote = not cls.PrimarySQLServerIsLocal
+            cls.PrimaryServer = connstr.server
+            cls.UID = connstr.uid
+            cls.PWD = connstr.pwd
+            cls.PrimaryServerIsLocal = is_local(cls.PrimaryServer)
+            cls.PrimaryServerIsRemote = not cls.PrimaryServerIsLocal
             cls.isTested = cls.isSafe = False
             cls.JdbcConnectionProperties.update(
                 {
-                    "user": cls.SQLServerUID or "NONE",
-                    "password": cls.SQLServerPWD or "NONE",
+                    "user": cls.UID or "NONE",
+                    "password": cls.PWD or "NONE",
                     "trustServerCertificate": str(connstr.trust_server_cert).lower(),
                 }
             )
@@ -68,15 +68,15 @@ class MSSQLConfig:
         cls.isTested = True
         try:
             conn = pyodbc.connect(
-                cls.ConfiguredConnectionString.value(), autocommit=True
+                cls.ConnectionString.value(), autocommit=True
             )
             assert not getattr(conn, "closed")
         except Exception as e:
             import warnings
 
             warnings.warn(
-                "Failed to connect with ConfiguredConnectionString\n\t"
-                f"{str(cls.ConfiguredConnectionString)}\n\n"
+                "Failed to connect with ConnectionString\n\t"
+                f"{str(cls.ConnectionString)}\n\n"
                 f"{e.with_traceback(e.__traceback__)}"
             )
         else:
