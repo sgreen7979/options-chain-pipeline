@@ -25,7 +25,7 @@ class HasConfiguredConnectionString(Protocol):
         ```python
         class MyMSSQLConfig:
             # Pass parameters directly
-            ConfiguredConnectionString: ClassVar[ConnString] = ConnString(
+            ConnectionString: ClassVar[ConnString] = ConnString(
                 server = "192.168.1.198",
                 database = "db_name",
                 uid = "user",
@@ -37,12 +37,12 @@ class HasConfiguredConnectionString(Protocol):
         class MyLocalMSSQLConfig:
             # `ConnString()` with no params passed returns a local connection string
             # to the 'master' database
-            ConfiguredConnectionString: ClassVar[ConnString] = ConnString()
+            ConnectionString: ClassVar[ConnString] = ConnString()
 
 
         class MyMSSQLConfig:
             # Pass parameters from environment variables
-            ConfiguredConnectionString: ClassVar[ConnString] = ConnString(
+            ConnectionString: ClassVar[ConnString] = ConnString(
                 server = os.getenv("PRIMARY_MSSQL_SERVER", None),
                 database = "db_name",
                 uid = os.getenv("MSSQL_UID", None),
@@ -52,9 +52,7 @@ class HasConfiguredConnectionString(Protocol):
         ```
     """
 
-    ConfiguredConnectionString: "ConnString"
-
-#!/usr/bin/env python3
+    ConnectionString: "ConnString"
 
 
 
