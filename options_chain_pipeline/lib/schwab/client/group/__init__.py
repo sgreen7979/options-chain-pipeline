@@ -22,7 +22,7 @@ from ...client import SchwabClient
 from ...credentials.functions import get_all_credentials
 
 if TYPE_CHECKING:
-    from daily.schwab.credentials import SchwabCredentials
+    from ...credentials import SchwabCredentials
 
 
 __all__ = ["ClientGroup"]
