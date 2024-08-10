@@ -1,8 +1,5 @@
-"""
-This module is meant to replace `daily/tda`.
-
-Why? --
-TD Ameritrade was acquired by Charles Schwab.
-The legacy API has been adapted by Schwab.
-The primary code changes entail updates to the API endpoints.
-"""
+#!/usr/bin/env python3
+from .client import SchwabClient  # noqa
+from .client import ClientGroup  # noqa
+from .credentials import NUM_ACCOUNTS  # noqa
+from .credentials import CREDENTIALS_DICT  # noqa
