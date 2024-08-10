@@ -1,27 +1,19 @@
 #!/usr/bin/env python3
 import os
 
-from daily.schwab.util import get_number_of_accounts
 from daily.utils.logging import get_logger
+
 from .credentials import SchwabCredentials
+from .util import get_number_of_accounts
 
 logger = get_logger(__name__)
 
 __all__ = ["SchwabCredentials", "NUM_ACCOUNTS", "CREDENTIALS_DICT"]
 
 
-# NUM_ACCOUNTS = get_number_of_accounts()
-NUM_ACCOUNTS = 4
+NUM_ACCOUNTS = get_number_of_accounts()
 """Number of Schwab accounts"""
 
-from daily.env.writer import EnvironmentWriter
-
-tmp = EnvironmentWriter(EnvironmentWriter.Level.TEMPORARILY)
-tmp.write(SCHWAB_API_KEY_4="5uBTHBT2QG5svX5IVxlVf6aIhJp6kfyB")
-tmp.write(SCHWAB_SECRET_4="Z0jsZDxwqxlAanVE")
-tmp.write(SCHWAB_APP_STATUS_4="READY_FOR_USE")
-tmp.write(SCHWAB_DEVELOPER_EMAIL_5="grnel7979@gmail.com")
-tmp.write(SCHWAB_DEVELOPER_EMAIL_6="ggrns@yahoo.com")
 
 CREDENTIALS_DICT: dict[int, SchwabCredentials] = {
     i: SchwabCredentials(
