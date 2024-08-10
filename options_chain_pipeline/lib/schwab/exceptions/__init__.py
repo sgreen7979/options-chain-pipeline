@@ -1,11 +1,30 @@
 import json
-import requests
 from typing import TYPE_CHECKING
+import urllib.parse
+
+import requests
 
 if TYPE_CHECKING:
     import datetime as dt
 
-from daily.utils.requests_dataclasses import _extract_params_from_url
+
+def _extract_params_from_url(url: Optional[str]):
+    if url is None:
+        return {}
+
+    def fmt(value: str):
+        if value.lower() == "true":
+            return True
+        elif value.lower() == "false":
+            return False
+        else:
+            return value
+
+    return {
+        # k: fmt(v[0])
+        k: v[0]
+        for k, v in urllib.parse.parse_qs(urllib.parse.urlparse(url).query).items()
+    }
 
 
 class SchwabRequestError(Exception):
@@ -208,3 +227,51 @@ class ReadTimeoutError(requests.exceptions.ReadTimeout):
         self.fetch_time = fetch_time
         self.prepared_request = prepared_request
         super().__init__(self.message)
+
+
+class InvalidResponseDataError(Exception):
+    """
+    Raised when data returned by option chain get request is invalid
+    """
+    
+    def __init__(self, sym: str, status_code: int):
+        self.sym = sym
+        self.status_code = status_code
+        super().__init__(self.__str__())
+
+    def __str__(self):
+        cls_name = type(self).__name__
+        return f"{cls_name}(underlying={self.sym}, status={self.status_code})"
+
+
+class ValidationException(Exception):
+    __alias__ = "val"
+
+    def __init__(self, msg, val):
+        self.msg = msg
+        self.val = val
+        super().__init__(self.__str__())
+
+    def __str__(self):
+        return f"{self.msg} ({self.__alias__}={self.val})"
+
+
+class InvalidApiKeyException(ValidationException):
+    __alias__ = "apikey"
+
+
+class InvalidAcctIdException(ValidationException):
+    __alias__ = "acctid"
+
+
+class InvalidAccountIndexError(Exception):
+    """Raised when an invalid account number is passed"""
+
+
+class EmptyLoginCredentialsException(Exception):
+    """Raised when either User ID or Password credentials is `None`."""
+
+
+class NoCredentialsFoundException(Exception):
+    """Raised when no account information can be found within
+    environment variables."""
