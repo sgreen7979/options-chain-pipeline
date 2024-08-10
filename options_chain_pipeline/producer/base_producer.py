@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import datetime as dt
 import json
 import os
@@ -15,9 +16,9 @@ from kafka import KafkaProducer
 from kafka.admin import NewTopic
 from kafka.errors import KafkaError
 
-from daily.schwab.client import ClientGroup
-from daily.utils.requests_dataclasses import RequestOutcome
-from daily.utils.requests_dataclasses import RequestStatistics
+from options_chain_pipeline.lib.schwab.client import ClientGroup
+# from daily.utils.requests_dataclasses import RequestOutcome
+# from daily.utils.requests_dataclasses import RequestStatistics
 
 if TYPE_CHECKING:
     import logging
@@ -43,7 +44,7 @@ class BaseProducer:
         self._removed_symbols: List[str] = []
         self._running = self._ran = False
         self._round_trip = self._batch_num = 0
-        self._request_statistics = RequestStatistics()
+        # self._request_statistics = RequestStatistics()
 
     @property
     def round_trip_time(self):
