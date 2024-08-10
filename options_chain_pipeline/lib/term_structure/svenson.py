@@ -11,8 +11,6 @@ from .base import YieldTermStructure
 from .types import MarketDataType
 from .types import SvensonParamsType
 
-# from daily.options.mcal.parallel import MarketCalendar
-
 
 class SvenssonYieldTermStructure(YieldTermStructure):
 
@@ -37,7 +35,6 @@ class SvenssonYieldTermStructure(YieldTermStructure):
         self.initial_guess: SvensonParamsType = (
             initial_guess or self.default_initial_guess
         )
-        # self.market_calendar = MarketCalendar()
         self.calibrate()
 
     def get_rate(self, t: float) -> float:
@@ -58,26 +55,6 @@ class SvenssonYieldTermStructure(YieldTermStructure):
             (1 - np.exp(-t / self.tau2)) / (t / self.tau2) - np.exp(-t / self.tau2)
         )
         return term1 + term2 + term3 + term4
-
-    # def get_rate_dte(self, dte: int) -> float:
-    #     """
-    #     Calculate the Svensson interest rate for a given time t.
-
-    #     :param dte: Days to expiration.
-    #     :type dte: int
-    #     :return: The interest rate.
-    #     :rtype: float
-    #     """
-    #     t = self.market_calendar(dte)
-    #     term1 = self.beta0
-    #     term2 = self.beta1 * (1 - np.exp(-t / self.tau1)) / (t / self.tau1)
-    #     term3 = self.beta2 * (
-    #         (1 - np.exp(-t / self.tau1)) / (t / self.tau1) - np.exp(-t / self.tau1)
-    #     )
-    #     term4 = self.beta3 * (
-    #         (1 - np.exp(-t / self.tau2)) / (t / self.tau2) - np.exp(-t / self.tau2)
-    #     )
-    #     return term1 + term2 + term3 + term4
 
     def objective_sv(self, params: SvensonParamsType) -> float:
         """
