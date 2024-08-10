@@ -25,9 +25,9 @@ from options_chain_pipeline.lib.utils.logging import get_logger
 
 from .bulk_insert import prepare_bulk_insert_query
 from .connection_string import ConnString
+from .protocols import Connection as ConnectionProto
 from .utils import LocalTempHandler
 from .utils import RemoteTempHandler
-from .protocols import Connection as ConnectionProto
 
 logger = get_logger("MSSQLClient", level=logging.DEBUG, propagate=False, fh=True)
 
