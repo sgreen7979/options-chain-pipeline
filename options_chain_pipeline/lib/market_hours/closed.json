@@ -1,0 +1,42 @@
+{
+    "option": {
+        "option": {
+            "date": "2024-06-08",
+            "marketType": "OPTION",
+            "product": "option",
+            "isOpen": false
+        }
+    },
+    "equity": {
+        "equity": {
+            "date": "2024-06-08",
+            "marketType": "EQUITY",
+            "product": "equity",
+            "isOpen": false
+        }
+    },
+    "bond": {
+        "bond": {
+            "date": "2024-06-08",
+            "marketType": "BOND",
+            "product": "bond",
+            "isOpen": false
+        }
+    },
+    "forex": {
+        "forex": {
+            "date": "2024-06-08",
+            "marketType": "FOREX",
+            "product": "forex",
+            "isOpen": false
+        }
+    },
+    "future": {
+        "future": {
+            "date": "2024-06-08",
+            "marketType": "FUTURE",
+            "product": "future",
+            "isOpen": false
+        }
+    }
+}
