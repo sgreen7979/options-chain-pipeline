@@ -9,8 +9,8 @@ from typing import Literal
 from typing import Optional
 from typing import TYPE_CHECKING
 
-from daily.market_hrs import MARKET_HOURS_PATH
-from daily.market_hrs.util import hours_to_datetime as strptime
+from ..market_hours import MARKET_HOURS_PATH
+from .util import strptime
 
 if TYPE_CHECKING:
     from daily.schwab.client import SchwabClient
