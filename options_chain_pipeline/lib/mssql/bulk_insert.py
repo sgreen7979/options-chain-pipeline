@@ -1,9 +1,6 @@
 #!/usr/bin/env python3
-
 from pathlib import Path
 from typing import Optional
-
-from daily.sql.mssql.create_server_connection import create_server_connection
 
 
 def prepare_bulk_insert_query(
@@ -62,7 +59,7 @@ def prepare_bulk_insert_query(
     return sql
 
 
-def bulk_insert_pyodbc(
+def bulk_insert_odbc(
     fpath: str,
     table: str,
     firstrow: int = 2,
@@ -125,40 +122,11 @@ def bulk_insert_pyodbc(
     )
     if verbose:
         print(sql)
+    from .client import MSSQLClient
+    from .config import MSSQLConfig
     if not no_insert:
-        with create_server_connection() as cnxn:
-            cnxn.execute(sql)
+        with MSSQLClient(MSSQLConfig.ConnectionString, autocommit=True) as conn:
+            conn.execute(sql)
 
 
-bulk_insert = bulk_insert_pyodbc
-
-
-# def main():
-#     table = 'options1'
-#     import time
-#     start = time.perf_counter()
-#     bulk_insert(table, TEST_FILE)
-#     end = time.perf_counter()
-#     elapsed = end - start
-#     if elapsed >= 1:
-#         print('took {}s'.format(elapsed))
-#     else:
-#         print('took {}ms'.format(elapsed*1000))
-
-# if __name__ == "__main__":
-#     main()
-
-# ********************************************************************************************
-# ********************************************************************************************
-# ********************************************************************************************
-
-# engine_coha35q = create_engine(
-#     'mssql+pyodbc://grn:nyknicks999@localhost:1433/stock_database_2?driver=ODBC Driver 17 for SQL Server'
-# )
-# Session: sessionmaker  = sessionmaker(engine_coha35q)
-# with Session.begin() as session:
-#     session.add()
-
-# DIR = './_chains'
-# TEST_FILE = 'option_chain.BIGTEST.csv'
-# TEST_DIR = '{}/{}'.format(DIR, TEST_FILE)
+bulk_insert = bulk_insert_odbc
