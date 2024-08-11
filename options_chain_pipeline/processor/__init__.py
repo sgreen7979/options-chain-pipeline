@@ -133,7 +133,7 @@ conf.set(
     f"-Dlog4j.configuration=file:{log4j_config_file} -Dlogfile.path={log_dir}",
 )
 
-conf.set("spark.sql.broadcastTimeout", "2400")  # Increase broadcast timeout
+conf.set("spark.sql.broadcastTimeout", "2400")
 conf.set("spark.executor.memory", "64g")
 conf.set("spark.executor.cores", "4")
 conf.set("spark.driver.memory", "64g")
@@ -450,7 +450,7 @@ def process_batch(df: "DataFrame", epoch_id: int) -> None:
             path = os.path.join(
                 env.DATA_PATH,
                 "spark_errors",
-                dt.date.today().isoformat(),
+                CURRENT_DATE,
                 str(epoch_id),
             )
             os.makedirs(path, exist_ok=True)
