@@ -65,7 +65,8 @@ KAFKA_BROKER = "localhost:9093"
 CURRENT_DATE = dt.date.today().strftime('%Y%m%d')
 TOPIC = f"option_chain_topic_{CURRENT_DATE}"
 # Set the checkpoint location to HDFS
-CHECKPOINT_DIR = f"file:///C:/Hadoop/hadoop-3.4.0/data/hdfs/checkpoints/{CURRENT_DATE}"
+HADOOP_HOME = os.environ["HADOOP_HOME"]
+CHECKPOINT_DIR = f"file:///{HADOOP_HOME}/data/hdfs/checkpoints/{CURRENT_DATE}"
 
 # SQL Server configuration
 SQL_PORT = "1433"
@@ -489,9 +490,9 @@ def main():
             .option("kafka.fetch.message.max.bytes", "10485880")
             .option("kafka.max.request.size", "10485880")
             .option("subscribe", TOPIC)
-            .option("maxOffsetsPerTrigger", 100)  # 100 offsets per trigger * 10 seconds processingTime = 1000 offsets per batch
-            .option("startingOffsets", "earliest")  # necessary for the first run on a topic
-            .option("checkpointLocation", CHECKPOINT_DIR)  # necessary for subsequent runs on the topic
+            .option("maxOffsetsPerTrigger", 100)  # 100 offsets per trigger per second * 15 seconds processingTime = 1500 offsets per batch
+            .option("startingOffsets", "earliest")
+            .option("checkpointLocation", CHECKPOINT_DIR)
             .load()
         )
 
