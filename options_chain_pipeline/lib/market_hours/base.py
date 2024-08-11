@@ -1,8 +1,14 @@
 #!/usr/bin/env python3
 
+from datetime import date
+from datetime import datetime
 from datetime import time
 
-from daily.market_hrs.util import time_to_dt
+TODAY = date.today()
+
+
+def today_at(t: time) -> datetime:
+    return datetime.combine(TODAY, time)
 
 
 class Option:
@@ -57,7 +63,7 @@ class Equity:
 
 class MarketHours:
     Simple = list(map(
-        time_to_dt, [
+        today_at, [
             Equity.PreMarket.Start,
             Equity.RegularMarket.Start,
             Equity.RegularMarket.End,
@@ -68,39 +74,39 @@ class MarketHours:
     ))
     Detailed = {
         "EQUITY": {
-            "prestart": time_to_dt(Equity.PreMarket.Start),
-            "regstart": time_to_dt(Equity.RegularMarket.Start),
-            "regend": time_to_dt(Equity.RegularMarket.End),
-            "postend": time_to_dt(Equity.PostMarket.End),
+            "prestart": today_at(Equity.PreMarket.Start),
+            "regstart": today_at(Equity.RegularMarket.Start),
+            "regend": today_at(Equity.RegularMarket.End),
+            "postend": today_at(Equity.PostMarket.End),
         },
         "OPTION": {
-            "EQUITY": {
-                "regstart": time_to_dt(Option.EQO.RegularMarket.Start),
-                "regend": time_to_dt(Option.EQO.RegularMarket.End),
+            "EQO": {
+                "regstart": today_at(Option.EQO.RegularMarket.Start),
+                "regend": today_at(Option.EQO.RegularMarket.End),
             },
             "IND": {
-                "regstart": time_to_dt(Option.IND.RegularMarket.Start),
-                "regend": time_to_dt(Option.IND.RegularMarket.End),
+                "regstart": today_at(Option.IND.RegularMarket.Start),
+                "regend": today_at(Option.IND.RegularMarket.End),
             }
         }
     }
 
     class Explicit:
         class Equity:
-            prestart = time_to_dt(Equity.PreMarket.Start)
-            regstart = time_to_dt(Equity.RegularMarket.Start)
-            regend = time_to_dt(Equity.RegularMarket.End)
-            postend = time_to_dt(Equity.PostMarket.End)
+            prestart = today_at(Equity.PreMarket.Start)
+            regstart = today_at(Equity.RegularMarket.Start)
+            regend = today_at(Equity.RegularMarket.End)
+            postend = today_at(Equity.PostMarket.End)
 
         class Option:
             class Equity:
-                regstart = time_to_dt(Option.EQO.RegularMarket.Start)
-                regend = time_to_dt(Option.EQO.RegularMarket.End)
+                regstart = today_at(Option.EQO.RegularMarket.Start)
+                regend = today_at(Option.EQO.RegularMarket.End)
             EQO = Equity
 
             class Index:
-                regstart = time_to_dt(Option.IND.RegularMarket.Start)
-                regend = time_to_dt(Option.IND.RegularMarket.End)
+                regstart = today_at(Option.IND.RegularMarket.Start)
+                regend = today_at(Option.IND.RegularMarket.End)
             IND = Index
 
 

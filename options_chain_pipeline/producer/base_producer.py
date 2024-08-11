@@ -2,14 +2,12 @@
 import datetime as dt
 import json
 import os
-from typing import (
-    Callable,
-    Dict,
-    List,
-    Optional,
-    Union,
-    TYPE_CHECKING,
-)
+from typing import Callable
+from typing import Dict
+from typing import List
+from typing import Optional
+from typing import Union
+from typing import TYPE_CHECKING
 
 from kafka import KafkaAdminClient
 from kafka import KafkaProducer
@@ -17,8 +15,8 @@ from kafka.admin import NewTopic
 from kafka.errors import KafkaError
 
 from options_chain_pipeline.lib.schwab.client import ClientGroup
-# from daily.utils.requests_dataclasses import RequestOutcome
-# from daily.utils.requests_dataclasses import RequestStatistics
+# from options_chain_pipeline.lib.utils.requests_dataclasses import RequestOutcome
+# from options_chain_pipeline.lib.utils.requests_dataclasses import RequestStatistics
 
 if TYPE_CHECKING:
     import logging

@@ -8,4 +8,7 @@ MARKET_HOURS_PATH = os.path.join(os.path.dirname(__file__), MARKET_HOURS_JSON)
 if not Path(MARKET_HOURS_PATH).is_file():
     from daily.market_hrs.util import find_market_hours_path
 
-    MARKET_HOURS_PATH = find_market_hours_path()
+    try:
+        MARKET_HOURS_PATH = find_market_hours_path()
+    except:
+        pass

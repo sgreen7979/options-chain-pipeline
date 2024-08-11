@@ -29,7 +29,7 @@ from options_chain_pipeline.lib.utils.logging import get_logger
 from .base_producer import BaseKafkaProducer
 
 if TYPE_CHECKING:
-    from daily.schwab.client import SchwabClient
+    from options_chain_pipeline.lib.schwab.client import SchwabClient
     from logging import Logger
 
 # Configuration
@@ -302,7 +302,6 @@ class OptionsChainProducer(BaseKafkaProducer):
             else:
                 logger.info(f"Starting round trip {self._round_trip}")
 
-            # symbols = deepcopy(self._symbols)
             symbols = self.symbols
             start_time = time.perf_counter()
             while symbols:

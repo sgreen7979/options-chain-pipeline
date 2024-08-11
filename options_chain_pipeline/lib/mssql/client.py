@@ -4,7 +4,7 @@ from abc import abstractmethod
 import datetime
 from enum import IntEnum
 import json
-import logging
+import os
 from threading import RLock
 from typing import Any
 from typing import cast
@@ -13,11 +13,13 @@ from typing import List
 from typing import Literal
 from typing import Optional
 from typing import Tuple
+from typing import TYPE_CHECKING
 
 import pandas as pd
 import pyodbc
 
-from options_chain_pipeline.lib.env import DATA_PATH
+# from options_chain_pipeline.lib.env import DATA_PATH
+from options_chain_pipeline.paths import DATA_PATH
 from options_chain_pipeline.lib.env import SSH_PASSWORD
 from options_chain_pipeline.lib.env import SSH_SERVER
 from options_chain_pipeline.lib.env import SSH_USER
@@ -29,7 +31,10 @@ from .protocols import Connection as ConnectionProto
 from .utils import LocalTempHandler
 from .utils import RemoteTempHandler
 
-logger = get_logger("MSSQLClient", level=logging.DEBUG, propagate=False, fh=True)
+if TYPE_CHECKING:
+    import logging
+
+logger = get_logger("MSSQLClient", level="DEBUG", propagate=False, fh=True)
 
 
 class AbstractSqlClient(ABC):
@@ -72,8 +77,9 @@ class MSSQLClient(AbstractSqlClient):
     Suggested usage:
         ```python
 
-        from daily.sql.mssql.client import MSSQLClient
-        from daily.sql.mssql.config import MSSQLConfig
+        from mssql import MSSQLClient, MSSQLConfig
+        with MSSQLClient(MSSQLConfig.ConnectionString, autocommit=True) as conn:
+            conn.execute(sql="<QUERY>", param1, param2)
     """
 
     _num_connnected: int = 0
@@ -109,18 +115,18 @@ class MSSQLClient(AbstractSqlClient):
         return self._cstring_obj.isremote
 
     @staticmethod
-    def get_logger() -> logging.Logger:
+    def get_logger() -> "logging.Logger":
         return logger
 
     def _get_temphandler(self):
         today = datetime.date.today().isoformat()
-        local_backup_path = f"{DATA_PATH}/bulk_insert_debug/{today}"
+        local_backup_path = os.path.join(DATA_PATH, "bulk_insert_debug", today)
 
         if self.is_remote:
             assert isinstance(SSH_SERVER, str)
             assert isinstance(SSH_USER, str)
             assert isinstance(SSH_PASSWORD, str)
-            logger.info("initializing RemoteTempHandler")
+            logger.info("Initializing RemoteTempHandler")
             return RemoteTempHandler(
                 SSH_SERVER,
                 SSH_USER,
@@ -198,11 +204,10 @@ class MSSQLClient(AbstractSqlClient):
                 logger.info("connecting")
                 self.conn = pyodbc.connect(self.conn_str, autocommit=self.autocommit)
                 MSSQLClient.register_connection()
-                # logging.info("Connected to database.")
+                # logger.info("Connected to database.")
             except pyodbc.Error as e:
-                # logging.error(f"Error connecting to database: {e}")
+                # logger.error(f"Error connecting to database: {e}")
                 logger.error(f"error connecting to database: {e}", exc_info=True)
-                # print(f"Error connecting to database: {e}")
                 raise
 
     def close(self) -> None:
@@ -328,7 +333,7 @@ class MSSQLClient(AbstractSqlClient):
             cur = cur.execute(
                 f"SELECT FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE WHERE TABLE_NAME = '{table}'"
             )
-            cur, results = self._extract_cursor_results(cur)
+            results = self._extract_cursor_results(cur)
         return results
 
     def __enter__(self) -> "MSSQLClient":
@@ -348,7 +353,7 @@ class MSSQLClient(AbstractSqlClient):
         logger.debug(f"executing select {sql}, {params}")
         with self.conn.cursor() as cur:
             cur = cur.execute(sql, *params)
-            cur, results = self._extract_cursor_results(cur)
+            results = self._extract_cursor_results(cur)
         return results
 
     def execute(self, sql: str, *params):
@@ -363,8 +368,8 @@ class MSSQLClient(AbstractSqlClient):
 
     def _extract_cursor_results(
         self, cur: pyodbc.Cursor
-    ) -> Tuple[pyodbc.Cursor, List[Dict[str, Any]]]:
-        logger.debug(f"extracting cursor results from cur {cur.description}")
+    ) -> List[Dict[str, Any]]:
+        logger.debug(f"Extracting cursor results from cur {cur.description}")
         columns = [column[0] for column in cur.description]
         results = cur.fetchall()
         ret: List[Dict[str, Any]] = []
@@ -373,7 +378,7 @@ class MSSQLClient(AbstractSqlClient):
             for idx, col in enumerate(columns):
                 row_dict[col] = row[idx]
             ret.append(row_dict)
-        return cur, ret
+        return ret
 
     def get_table_definitions(
         self, table: str, catalog: str, schema: str = "dbo", to_df: bool = False
