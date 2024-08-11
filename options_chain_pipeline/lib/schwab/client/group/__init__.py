@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 
 from redis import Redis
 
-from options_chain_pipeline.lib import get_logger
+from options_chain_pipeline.lib.utils.logging import get_logger
 from options_chain_pipeline.lib.utils.singleton import StrictSingleton
 
 from ...client import SchwabClient
