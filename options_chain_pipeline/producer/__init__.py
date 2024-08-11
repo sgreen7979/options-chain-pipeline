@@ -20,10 +20,10 @@ from typing import Union
 
 from options_chain_pipeline.lib import FundamentalsLoader
 from options_chain_pipeline.lib import get_hour, fetch_today, isOpen
-from options_chain_pipeline.lib.schwab.exceptions import ReadTimeoutError
-from options_chain_pipeline.lib.schwab.exceptions import UnexpectedTokenAuthError
-from options_chain_pipeline.lib.schwab.option_chain import OptionChain as OptionsChainParams
-from options_chain_pipeline.lib.symbols import get_options_universe
+from options_chain_pipeline.lib import ReadTimeoutError
+from options_chain_pipeline.lib import UnexpectedTokenAuthError
+from options_chain_pipeline.lib import OptionChain as OptionsChainParams
+from options_chain_pipeline.lib import get_options_universe
 from options_chain_pipeline.lib.utils.logging import get_logger
 
 from .base_producer import BaseKafkaProducer
