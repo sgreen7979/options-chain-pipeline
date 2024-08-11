@@ -96,6 +96,10 @@ class ClientGroup(metaclass=StrictSingleton):
             client = self._clients[wait_times.index(min_wait_time)]
             return client
 
+    @property
+    def next(self):
+        return self._get_next_client_with_capacity(incl_queued=False)
+
     @contextmanager
     def await_next_client(self, incl_queued: bool = False):
         with ClientGroup._lock:
