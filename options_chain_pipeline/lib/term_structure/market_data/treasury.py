@@ -14,19 +14,20 @@ from bs4 import BeautifulSoup
 from bs4 import Tag
 import pandas as pd
 
+from options_chain_pipeline.lib.cal import get_prior_bizday
+from options_chain_pipeline.lib.cal import is_bizday
+from options_chain_pipeline.lib.utils.logging import get_logger
+
 from ..types import MarketDataType
 from ..types import DateValueMonthType
 from ..types import URLNameType
-from daily.utils.cal import get_prior_bizday
-from daily.utils.cal import is_bizday
-from daily.utils.logging import get_logger
 
 HOME = "https://home.treasury.gov"
 INTEREST_RATE_BASE_URL = (
     f"{HOME}/resource-center/data-chart-center/interest-rates/TextView?"
 )
 
-logger = get_logger("daily.term_structure.market_data.treasury", ch=True, level="INFO")
+logger = get_logger("options_chain_pipeline.lib.term_structure.market_data.treasury", ch=True, level="INFO")
 
 
 class Endpoints(Enum):

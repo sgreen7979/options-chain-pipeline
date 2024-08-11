@@ -59,7 +59,7 @@ MAX_WORKERS_EXECUTOR = 20
 # Logging setup
 LOG_LEVEL = "DEBUG"
 logger = get_logger(
-    "daily.schwab.options_producer" if __name__ == "__main__" else __name__,
+    "options_chain_pipeline.producer" if __name__ == "__main__" else __name__,
     level=LOG_LEVEL,
     ch=True,
     ch_level="INFO",

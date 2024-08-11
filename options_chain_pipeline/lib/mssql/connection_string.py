@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import os
+import platform
 import pyodbc
 import re
 from types import SimpleNamespace
@@ -79,7 +80,7 @@ class ConnString:
                 pwd is None,
             ]
         ):
-            raise daily.sql.exc.IncompleteParametersException(
+            raise exc.IncompleteParametersException(
                 "When using Mac, Linux, or any non-Windows OS, you "
                 f"must provide parameters for `server` ('{server}'), "
                 f"`uid` ('{uid}'), and `pwd` ('****') to the "
@@ -107,7 +108,7 @@ class ConnString:
     @staticmethod
     def _assert_driver_installation(driver):
         if driver not in pyodbc.drivers():
-            raise daily.sql.exc.MissingDriverError(driver)
+            raise exc.MissingDriverError(driver)
 
     def value(self):
         base = (

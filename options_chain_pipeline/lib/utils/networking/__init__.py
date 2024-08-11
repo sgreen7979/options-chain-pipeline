@@ -229,7 +229,7 @@ def get_user_ssh_known_hosts() -> List[str]:
     in user ssh config file
 
     ```python
-    >>> from daily.utils.networking import get_ssh_known_hosts
+    >>> from options_chain_pipeline.lib.utils.networking import get_ssh_known_hosts
     >>> print(get_ssh_known_hosts())
     ['desktop-coha35q',
     'fe80::6701:d122:f098:559c%2',

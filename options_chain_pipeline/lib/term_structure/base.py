@@ -49,7 +49,7 @@ class YieldTermStructure(SimpleYieldTermStructure):
 
     @classmethod
     def without_data(cls, ref_date: Optional[dt.date] = None):
-        from daily.term_structure.market_data import get_market_data
+        from .market_data import get_market_data
 
         ref_date, mkt_data = get_market_data()
         return cls(ref_date, mkt_data)

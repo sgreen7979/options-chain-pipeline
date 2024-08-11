@@ -5,7 +5,7 @@ import os
 def get_number_of_accounts(raise_on_failure: bool = False):
     num_accounts = search_for_active_accounts()
     if not num_accounts and raise_on_failure:
-        from daily.schwab.exc import NoCredentialsFoundException
+        from ..exceptions import NoCredentialsFoundException
 
         raise NoCredentialsFoundException(
             "Failed to retrieve Schwab account information from environment."

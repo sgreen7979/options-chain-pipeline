@@ -13,12 +13,13 @@ from typing import Union
 
 import pandas as pd
 
-from daily.schwab.pyrobot.trades import Trade
-from daily.schwab.pyrobot.portfolio import Portfolio
-from daily.schwab.pyrobot.stock_frame import StockFrame
+from ..client import SchwabClient
+from ..utils import SchwabUtilities
 
-from daily.schwab.client import SchwabClient
-from daily.schwab.utils import SchwabUtilities
+from .trades import Trade
+from .portfolio import Portfolio
+from .stock_frame import StockFrame
+
 
 
 # We are going to be doing some timestamp conversions.

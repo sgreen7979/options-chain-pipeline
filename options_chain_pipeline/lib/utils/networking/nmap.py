@@ -69,7 +69,7 @@ __last_modification__ = "2021.06.29"
 
 
 ############################################################################
-# I added these types for use in daily.utils.networking
+# I added these types for use in options_chain_pipeline.lib.utils.networking
 
 
 class ScanEntryType(TypedDict):

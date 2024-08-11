@@ -10,10 +10,11 @@ import zlib
 
 import paramiko
 
-from daily.sql.mssql.connection_string import ConnString
-from daily.types import StrPath
-from daily.utils.logging import get_logger
-from daily.utils.networking import get_hostname
+from options_chain_pipeline.lib.types import StrPath
+from options_chain_pipeline.lib.utils.networking import get_hostname
+from options_chain_pipeline.lib.utils.logging import get_logger
+
+from .connection_string import ConnString
 
 logger = get_logger("TempHandler", propagate=False, fh=True)
 
@@ -249,18 +250,15 @@ def TempHandler(
     elif remote_path is None:
         raise ValueError("remote_path must be provided if connection is remote")
     else:
-        from daily.env import SSH_SERVER
-        from daily.env import SSH_USER
-        from daily.env import SSH_PASSWORD
+        from options_chain_pipeline.lib.env import SSH_SERVER
+        from options_chain_pipeline.lib.env import SSH_USER
+        from options_chain_pipeline.lib.env import SSH_PASSWORD
 
         assert isinstance(SSH_SERVER, str)
         assert isinstance(SSH_USER, str)
         assert isinstance(SSH_PASSWORD, str)
 
         return RemoteTempHandler(
-            # hostname=os.environ["SQL_PRIMARY_SERVER"],
-            # username=os.environ["SQL_PRIMARY_SERVER_USERNAME"],
-            # password=os.environ["SQL_PRIMARY_SERVER_PASSWORD"],
             hostname=SSH_SERVER,
             username=SSH_USER,
             password=SSH_PASSWORD,

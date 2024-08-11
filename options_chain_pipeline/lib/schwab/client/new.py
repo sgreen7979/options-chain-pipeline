@@ -14,15 +14,16 @@ from typing import TYPE_CHECKING
 from typing import Union
 import requests
 
-from daily.utils.logging import get_logger
+from options_chain_pipeline.lib.utils.logging import get_logger
 
-from .base import BaseSchwabClient
 from ..credentials.functions import get_credentials
 from ..option_chain import OptionChain as OptionsChainParams
 from .. import exceptions as exc
+from ..exceptions import _extract_params_from_url
+
+from .base import BaseSchwabClient
 from .capacity import CapacityLimiterMixin
 from .meta import SchwabClientMeta
-from daily.utils.requests_dataclasses import _extract_params_from_url
 
 if TYPE_CHECKING:
     from ..credentials import SchwabCredentials
@@ -30,7 +31,7 @@ if TYPE_CHECKING:
 
 
 logger = get_logger(
-    __name__ if __name__ != "__main__" else "daily.schwab.client.SchwabClient",
+    __name__ if __name__ != "__main__" else "options_chain_pipeline.lib.schwab.client.SchwabClient",
     fh=True,
     fh_level="DEBUG",
 )

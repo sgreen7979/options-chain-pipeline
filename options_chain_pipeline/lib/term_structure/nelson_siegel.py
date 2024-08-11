@@ -6,9 +6,9 @@ from typing import Optional
 import numpy as np
 from scipy.optimize import minimize
 
-from daily.term_structure.base import YieldTermStructure
-from daily.term_structure.types import MarketDataType
-from daily.term_structure.types import NelsonSiegelParamsType
+from .base import YieldTermStructure
+from .types import MarketDataType
+from .types import NelsonSiegelParamsType
 
 
 class NelsonSiegelYieldTermStructure(YieldTermStructure):

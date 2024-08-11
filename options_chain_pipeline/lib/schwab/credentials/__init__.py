@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import os
 
-from daily.utils.logging import get_logger
+from options_chain_pipeline.lib.utils.logging import get_logger
 
 from .credentials import SchwabCredentials
 from .util import get_number_of_accounts

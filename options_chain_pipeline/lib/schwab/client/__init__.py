@@ -12,7 +12,7 @@ def setSchwabClientClass(klass):
     if klass != SchwabClient:
         if not issubclass(klass, SchwabClient):
             raise TypeError(
-                "schwabClientClass not derived from daily.schwab.client.SchwabClient: "
+                "schwabClientClass not derived from options_chain_pipeline.lib.schwab.client.SchwabClient: "
                 + klass.__name__
             )
     global SchwabClient

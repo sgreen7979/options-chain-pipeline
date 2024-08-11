@@ -1,28 +1,18 @@
 #!/usr/bin/env python3
-# from concurrent.futures import as_completed
-# from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from datetime import datetime
 from datetime import time
 from datetime import timedelta
-
-# from datetime import timezone
 from functools import lru_cache
-
-# from threading import RLock
 from typing import Optional
 from tzlocal import get_localzone
 
 import pandas as pd
-
-# from pandas import DataFrame
-
-# from pandas import Series
 import pandas_market_calendars as mcal
 
-# from daily.utils.cal import UtcOffset
-from daily.utils.cal import get_prior_bizday
-from daily.options.mcal.calendars import MarketCalendars
+from options_chain_pipeline.lib.cal import get_prior_bizday
+
+from .mcal.calendars import MarketCalendars
 
 
 class MarketCalendar:
@@ -57,9 +47,7 @@ class MarketCalendar:
         :type name: MarketCalendars, optional
         """
         self.name = name.value
-        # self.lock = RLock()
         self.set_current_time(current_time or self.now())
-        # self.START = (self.current_time - timedelta(days=3)).date()
         if start is not None:
             self.START = start
         elif current_time is not None:
@@ -80,10 +68,6 @@ class MarketCalendar:
     def now() -> datetime:
         return datetime.now()
 
-    # @staticmethod
-    # def to_utc(current_time: datetime) -> datetime:
-    #     return UtcOffset().toUtc(current_time).replace(tzinfo=timezone.utc)
-
     @property
     def current_start_date(self) -> date:
         return self.current_time.date()
@@ -96,24 +80,12 @@ class MarketCalendar:
         :return: The market schedule.
         :rtype: DataFrame
         """
-        # tz = datetime.now(timezone.utc).astimezone().tzname()
         schedule = self.calendar.schedule(
             start_date=self.START, end_date=self.END, tz=self.tz
         )
         schedule.reset_index(inplace=True)
         schedule.rename(columns={'index': 'datetime'}, inplace=True)
         schedule['iso_date'] = schedule['datetime'].dt.strftime('%Y-%m-%d')
-
-        # # # Parallel processing for calculating hours
-        # # with ThreadPoolExecutor() as executor:
-        # #     futures = {
-        # #         executor.submit(self._calculate_hours_single_row, row): idx
-        # #         for idx, row in schedule.iterrows()
-        # #     }
-        # #     for future in as_completed(futures):
-        # #         idx = futures[future]
-        # #         schedule.at[idx, 'hours'] = future.result()
-
         schedule["hours"] = schedule.apply(
             lambda row: self._calculate_hours_single_row(row), axis=1
         )
@@ -125,15 +97,12 @@ class MarketCalendar:
         if not cutoff_idxs:
             schedule['T'] = schedule['hours'].cumsum() / self.TRADING_HOURS_PER_YEAR
         else:
-            # Step 1: Extract the rows before the cutoff index
             cutoff_idx = cutoff_idxs[-1]
             first_rows = schedule.iloc[: cutoff_idx + 1]  # NEW
-            # Step 2: Calculate the cumulative sum for the remaining rows
             cumsum_rest = (
                 schedule.iloc[cutoff_idx + 1 :]["hours"].cumsum()
                 / self.TRADING_HOURS_PER_YEAR
-            )  # NEW
-            # Step 3: Combine the first row and the cumulative sum
+            )
             cumsum_series = pd.concat(
                 [
                     pd.Series(
@@ -141,9 +110,8 @@ class MarketCalendar:
                     ),
                     cumsum_rest,
                 ]
-            )  # NEW
+            )
 
-            # Step 4: Add the cumulative sum series as a new column to the original DataFrame
             schedule['T'] = cumsum_series  # NEW
 
         schedule = schedule[

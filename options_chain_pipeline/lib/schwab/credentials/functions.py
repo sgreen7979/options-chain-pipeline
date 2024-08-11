@@ -5,7 +5,7 @@ from typing import Optional
 from typing import Tuple
 from typing import TYPE_CHECKING
 
-from daily.utils.logging import get_logger
+from options_chain_pipeline.lib.utils.logging import get_logger
 
 from ..credentials import CREDENTIALS_DICT
 from ..credentials import NUM_ACCOUNTS

@@ -12,7 +12,7 @@ from typing import Union
 import requests
 import urllib.parse
 
-from daily.utils.logging import get_logger
+from options_chain_pipeline.lib.utils.logging import get_logger
 
 from ..enums import VALID_CHART_VALUES
 from ..option_chain import OptionChain as OptionChainParams

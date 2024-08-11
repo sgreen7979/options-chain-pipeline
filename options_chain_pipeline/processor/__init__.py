@@ -57,7 +57,7 @@ if TYPE_CHECKING:
 
 LOG_LEVEL = "INFO"
 logger = get_logger(
-    "daily.schwab.options_processor", level=LOG_LEVEL, fh=True, fh_level="DEBUG"
+    "options_chain_pipeline.processor", level=LOG_LEVEL, fh=True, fh_level="DEBUG"
 )
 
 # Kafka configuration
