@@ -4,4 +4,5 @@ from .market_hours import *
 from .mssql import *
 from .options import *
 from .schwab import *
+from .symbols import *
 from .term_structure import *
