@@ -16,7 +16,7 @@ from pyspark.sql.streaming.listener import (  # noqa
     StreamingQueryProgress,
 )
 
-from options_chain_pipeline.lib.utils.logging import get_logger
+from options_chain_pipeline.lib import get_logger
 
 
 class MyListener(StreamingQueryListener):
