@@ -11,6 +11,7 @@ __all__ = [
 ]
 
 FUNDAMENTAL_DATA_PATH = os.path.join(DATA_PATH, "fundamental")
+os.makedirs(FUNDAMENTAL_DATA_PATH, exist_ok=True)
 FUNDAMENTAL_DB_PATH = os.path.join(FUNDAMENTAL_DATA_PATH, "fundamental.json")
 METADATA_PATH = os.path.join(FUNDAMENTAL_DATA_PATH, "fundamental.pickle")
 
