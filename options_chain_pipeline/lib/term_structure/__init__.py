@@ -12,3 +12,4 @@ from .piecewise import (
     PiecewiseLinearYieldTermStructure as PiecewiseLinearYieldTermStructure,
 )  # noqa
 from .svenson import SvenssonYieldTermStructure as SvenssonYieldTermStructure  # noqa
+from .util import continuously_compounding_rate as continuously_compounding_rate
