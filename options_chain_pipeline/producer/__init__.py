@@ -256,7 +256,7 @@ class OptionsChainProducer(BaseKafkaProducer):
             # self._to_kafka(symbol, data)
         else:
             logger.error(f"Invalid request data {symbol}")
-            if self._running and self._round_trip <= 1 and symbol != "GME":
+            if self._running and self._round_trip <= 1:
                 self.remove_symbol(symbol)
 
     def _get_params(self, symbol: str) -> Dict[str, Any]:
