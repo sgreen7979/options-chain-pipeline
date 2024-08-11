@@ -1,10 +1,6 @@
 #!/usr/bin/env python3
-from options_chain_pipeline.lib.utils.logging import get_logger
-
 from .new import SchwabClient  # noqa
 from .group import ClientGroup  # noqa
-
-logger = get_logger(__name__)
 
 
 def setSchwabClientClass(klass):

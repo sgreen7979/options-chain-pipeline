@@ -18,8 +18,8 @@ from typing import Tuple
 from typing import TYPE_CHECKING
 from typing import Union
 
-from options_chain_pipeline.lib.fundamental.loader import FundamentalsLoader
-from options_chain_pipeline.lib.market_hours import functions as mh
+from options_chain_pipeline.lib import FundamentalsLoader
+from options_chain_pipeline.lib import get_hour, fetch_today, isOpen
 from options_chain_pipeline.lib.schwab.exceptions import ReadTimeoutError
 from options_chain_pipeline.lib.schwab.exceptions import UnexpectedTokenAuthError
 from options_chain_pipeline.lib.schwab.option_chain import OptionChain as OptionsChainParams
@@ -29,7 +29,7 @@ from options_chain_pipeline.lib.utils.logging import get_logger
 from .base_producer import BaseKafkaProducer
 
 if TYPE_CHECKING:
-    from options_chain_pipeline.lib.schwab.client import SchwabClient
+    from options_chain_pipeline.lib import SchwabClient
     from logging import Logger
 
 # Configuration
@@ -151,16 +151,16 @@ class OptionsChainProducer(BaseKafkaProducer):
             logger.info(f"Testing for {test_time_minutes} minutes")
             return regstart, regend
         else:
-            hours = mh.fetch_today()
+            hours = fetch_today()
 
-            if not mh.isOpen(hours, "option"):
+            if not isOpen(hours, "option"):
                 logger.error("Options markets are closed.")
                 self.cleanup()
                 sys.exit(-1)
 
             return (
-                mh.get_hour(hours, "$.option.EQO.sessionHours.regularMarket[0].start"),
-                mh.get_hour(hours, "$.option.IND.sessionHours.regularMarket[0].end"),
+                get_hour(hours, "$.option.EQO.sessionHours.regularMarket[0].start"),
+                get_hour(hours, "$.option.IND.sessionHours.regularMarket[0].end"),
             )
 
     def _validate_chain_response_data(self, resp_data: Dict) -> bool:
