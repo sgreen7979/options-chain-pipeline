@@ -9,11 +9,10 @@ from typing import Literal
 from typing import Optional
 from typing import TYPE_CHECKING
 
-from ..market_hours import MARKET_HOURS_PATH
 from .util import strptime
 
 if TYPE_CHECKING:
-    from daily.schwab.client import SchwabClient
+    from options_chain_pipeline.lib import SchwabClient
 
 MARKETS = ["EQUITY", "OPTION", "FUTURE", "BOND", "FOREX"]
 
@@ -30,8 +29,21 @@ MarketsType = Literal[
     "forex",
 ]
 
+__all__ = [
+    "isOpen",
+    "get_hour",
+    "strptime",
+    "fetch",
+    "fetch_today",
+    "read",
+    "write",
+    "get_date",
+]
+
 
 def read():
+    from ..market_hours import MARKET_HOURS_PATH
+
     if os.path.exists(MARKET_HOURS_PATH):
         with open(MARKET_HOURS_PATH, "r") as f:
             data = json.load(f)
@@ -39,6 +51,8 @@ def read():
 
 
 def write(data: dict) -> None:
+    from ..market_hours import MARKET_HOURS_PATH
+
     with open(MARKET_HOURS_PATH, "w") as f:
         json.dump(data, f, indent=4)
 
