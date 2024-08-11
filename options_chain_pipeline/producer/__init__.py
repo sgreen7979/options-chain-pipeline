@@ -18,13 +18,21 @@ from typing import Tuple
 from typing import TYPE_CHECKING
 from typing import Union
 
-from options_chain_pipeline.lib import FundamentalsLoader
-from options_chain_pipeline.lib import get_hour, fetch_today, isOpen
-from options_chain_pipeline.lib import ReadTimeoutError
-from options_chain_pipeline.lib import UnexpectedTokenAuthError
-from options_chain_pipeline.lib import OptionChain as OptionsChainParams
-from options_chain_pipeline.lib import get_options_universe
-from options_chain_pipeline.lib.utils.logging import get_logger
+from options_chain_pipeline.lib import (
+    FundamentalsLoader,
+    get_hour, fetch_today, isOpen,
+    ReadTimeoutError, UnexpectedTokenAuthError,
+    OptionChain as OptionsChainParams,
+    get_options_universe,
+    get_logger
+)
+# from options_chain_pipeline.lib import FundamentalsLoader
+# from options_chain_pipeline.lib import get_hour, fetch_today, isOpen
+# from options_chain_pipeline.lib import ReadTimeoutError
+# from options_chain_pipeline.lib import UnexpectedTokenAuthError
+# from options_chain_pipeline.lib import OptionChain as OptionsChainParams
+# from options_chain_pipeline.lib import get_options_universe
+# from options_chain_pipeline.lib import get_logger
 
 from .base_producer import BaseKafkaProducer
 
@@ -341,13 +349,12 @@ def parse_args():
 
 def main():
     args = parse_args()
-    chain_request_params = OptionsChainParams(
-        symbol="<symbol>",
-        include_quotes=True,
-        strategy=OptionsChainParams.Strategy.ANALYTICAL,
-    )
     producer = OptionsChainProducer(
-        chain_request_params,
+        OptionsChainParams(
+            symbol="<symbol>",
+            include_quotes=True,
+            strategy=OptionsChainParams.Strategy.ANALYTICAL,
+        ),
         get_options_universe,
         test=args.test,
         test_time_minutes=args.test_time,

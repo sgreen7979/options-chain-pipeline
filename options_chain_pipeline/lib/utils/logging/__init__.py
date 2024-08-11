@@ -17,8 +17,7 @@ from typing import TextIO
 from typing import Type
 from typing import Union
 
-from daily import LOG_PATH
-from daily._types import StrPath
+from options_chain_pipeline.lib._types import StrPath
 
 DEFAULT_FORMATTER = logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
 
@@ -72,6 +71,8 @@ class LogFormatOpts:
 
 
 def ensure_logpath(prefix, suffix, logfolder: Optional[str] = None) -> Path:
+    from options_chain_pipeline.lib import LOG_PATH
+    
     if logfolder is not None:
         while logfolder.endswith("/") or logfolder.endswith("\\"):
             logfolder = logfolder[:-1]
