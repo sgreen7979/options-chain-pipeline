@@ -148,7 +148,7 @@ def fetch(
         return hours
     else:
         if client is None:
-            from daily.schwab.client import ClientGroup
+            from options_chain_pipeline.lib.schwab.client import ClientGroup
 
             client = ClientGroup()._await_client_with_capacity(incl_queued=True)
         # client._await_capacity(incl_queued=True)

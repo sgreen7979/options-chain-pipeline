@@ -4,13 +4,13 @@ import datetime
 import json
 import os
 
-from daily.env import MODULE
-from daily.market_hrs.base import Equity
-from daily.market_hrs.base import EQUITY_OPEN
-from daily.market_hrs.base import Option
-from daily.market_hrs.base import OPTION_OPEN
-from daily.market_hrs.util import time_to_dt
-from daily.market_hrs.util import utc_offset
+from options_chain_pipeline.lib.env import MODULE
+from .base import Equity
+from .base import EQUITY_OPEN
+from .base import Option
+from .base import OPTION_OPEN
+from .base import today_at
+from .util import utc_offset
 
 
 PARENT = os.path.basename(os.path.dirname(__file__))
@@ -25,7 +25,7 @@ def equity(
     """
 
     if closed:
-        from daily.market_hrs.base import EQUITY_CLOSED
+        from .base import EQUITY_CLOSED
         return json.loads(EQUITY_CLOSED.format(date=date))
 
     prestart: datetime.time | str
@@ -78,7 +78,7 @@ def option(
     """
 
     if closed:
-        from daily.market_hrs.base import OPTION_CLOSED
+        from .base import OPTION_CLOSED
         return json.loads(OPTION_CLOSED.format(date=date))
 
     regstart: datetime.time | str
@@ -116,16 +116,16 @@ def option(
 def get_timedelta_seconds(now=None):
 
     return (
-        datetime.datetime.now() - time_to_dt(Equity.REGEND)
+        datetime.datetime.now() - today_at(Equity.REGEND)
     ).total_seconds() + 60 * 15
 
 
 def past_regend() -> bool:
-    return datetime.datetime.now() >= time_to_dt(Equity.REGEND)
+    return datetime.datetime.now() >= today_at(Equity.REGEND)
 
 
 def pre_regstart() -> bool:
-    return datetime.datetime.now() < time_to_dt(Equity.REGSTART)
+    return datetime.datetime.now() < today_at(Equity.REGSTART)
 
 
 def get_prestart(now: datetime.datetime) -> datetime.time:

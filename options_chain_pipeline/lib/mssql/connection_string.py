@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
 import os
-import platform
 import pyodbc
 import re
 from types import SimpleNamespace
 from typing import Dict
 from typing import Optional
 
-from daily.env import IS_LINUX
-from daily.env import IS_WINDOWS
-import daily.sql.exc
-from daily.utils.networking import get_local_ipv4
+from options_chain_pipeline.lib.env import IS_LINUX
+from options_chain_pipeline.lib.env import IS_WINDOWS
+from options_chain_pipeline.lib.env import LOCAL_HOSTNAME
+from options_chain_pipeline.lib.env import LOCAL_IPv4
+
+from . import exceptions as exc
 
 
 class ConnString:
@@ -85,7 +86,7 @@ class ConnString:
                 f"{self.__class__.__name__} constructor"
             )
 
-        self.server = server or platform.node()
+        self.server = server or LOCAL_HOSTNAME
         self.database = database or "master"
         self.uid = uid
         self.pwd = pwd
@@ -153,7 +154,7 @@ class ConnString:
 
     @property
     def islocal(self):
-        return self.server in [get_local_ipv4(), platform.node()]
+        return self.server in [LOCAL_IPv4, LOCAL_HOSTNAME]
 
     @property
     def isremote(self):

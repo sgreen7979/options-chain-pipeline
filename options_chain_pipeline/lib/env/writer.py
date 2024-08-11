@@ -130,7 +130,7 @@ class EnvironmentWriter:
         Example usages::
 
             ```python
-            from daily.env.writer import EnvironmentWriter
+            from options_chain_pipeline.lib.env.writer import EnvironmentWriter
 
             # write a user environment variable
             # NOTE: usually need to restart the machine for this to take effect
@@ -188,7 +188,7 @@ class EnvironmentWriter:
         Example usages::
 
             ```python
-            from daily.env.writer import EnvironmentWriter
+            from options_chain_pipeline.lib.env.writer import EnvironmentWriter
 
             # write a user environment variable
             # NOTE: usually need to restart the machine for this to take effect
@@ -228,7 +228,7 @@ class EnvironmentWriter:
     def system(self, **env_vars):
         if IS_UNIX:
             env_vars = json.dumps(env_vars)
-            cmd = f"sudo python3 -m daily.env._admin {env_vars} --sys"
+            cmd = f"sudo python3 -m options_chain_pipeline.lib.env._admin {env_vars} --sys"
             proc = subprocess.Popen(
                 args=cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE
             )
@@ -260,7 +260,7 @@ class EnvironmentWriter:
     def user(self, **env_vars):
         if IS_UNIX:
             env_vars = json.dumps(env_vars)
-            cmd = f"sudo python3 -m daily.env._admin {env_vars} --usr"
+            cmd = f"sudo python3 -m options_chain_pipeline.lib.env._admin {env_vars} --usr"
             proc = subprocess.Popen(
                 args=cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE
             )
