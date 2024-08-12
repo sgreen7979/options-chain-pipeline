@@ -9,10 +9,10 @@ from ._os import OS
 
 def get_manager_class():
     if IS_WINDOWS:
-        from ._win import WinEnvironmentManager as manager_class
+        from .win import WinEnvironmentManager as manager_class
     elif IS_UNIX:
         # FIXME missing UnixEnvironmentManager
-        from ._unix import UnixEnvironmentManager as manager_class
+        from .unix import UnixEnvironmentManager as manager_class
     else:
         raise OSError(f"No implementation for OS '{OS}'")
 

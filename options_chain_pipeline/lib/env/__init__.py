@@ -30,12 +30,12 @@ __all__ = [
     "LOG_PATH",
     "MODULE",
     "PROJECT_ROOT",
-    "SQL_PRIMARY_SERVER",
-    "SQL_UID",
-    "SQL_PWD",
+    "SSH_PASSWORD",
     "SSH_SERVER",
     "SSH_USER",
-    "SSH_PASSWORD",
+    "SQL_PRIMARY_SERVER",
+    "SQL_PWD",
+    "SQL_UID",
     "USER_AGENT",
 ]
 
