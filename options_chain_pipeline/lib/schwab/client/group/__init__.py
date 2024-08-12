@@ -141,7 +141,7 @@ class ClientGroup(metaclass=StrictSingleton):
             return json.dumps(obj.decode())
         elif isinstance(obj, (dt.date, dt.datetime)):
             return json.dumps(obj.isoformat())
-        elif isinstance(obj, (dt.timedelta)):
+        elif isinstance(obj, dt.timedelta):
             return json.dumps(obj.total_seconds())
         elif isinstance(obj, Dict):
             return json.dumps(
