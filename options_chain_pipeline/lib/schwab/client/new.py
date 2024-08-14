@@ -32,7 +32,7 @@ if TYPE_CHECKING:
 
 
 logger = get_logger(
-    __name__ if __name__ != "__main__" else "daily.schwab.client.SchwabClient",
+    __name__ if __name__ != "__main__" else "options_chain_pipeline.lib.schwab.client.SchwabClient",
     fh=True,
     fh_level="DEBUG",
 )
