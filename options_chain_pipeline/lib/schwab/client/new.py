@@ -28,7 +28,6 @@ from .meta import SchwabClientMeta
 
 if TYPE_CHECKING:
     from ..credentials import SchwabCredentials
-    from ..accounts import Account
 
 
 logger = get_logger(
