@@ -202,15 +202,9 @@ class OptionsChainProducer(BaseKafkaProducer):
         while dt.datetime.now() < self.regend:
             expected_request_count = self.expected_request_count
             if self._total_requests <= expected_request_count:
-                self._round_trip += 1
                 
-                if (
-                    dt.datetime.now() + dt.timedelta(minutes=self.round_trip_time)
-                    > self.regend
-                ):
-                    logger.info(f"Starting FINAL round trip {self._round_trip}")
-                else:
-                    logger.info(f"Starting round trip {self._round_trip}")
+                self._round_trip += 1
+                logger.info(f"Starting round trip {self._round_trip}")
 
                 symbols = self.symbols
                 end_time = (
