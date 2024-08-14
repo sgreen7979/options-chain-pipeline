@@ -184,12 +184,6 @@ class OptionsChainProducer(BaseKafkaProducer):
         self._ran = True
         self._total_requests = 0
 
-        now = dt.datetime.now()
-        if now > self.regend:
-            logger.info("Options markets are closed.")
-            self.cleanup()
-            return
-
         if now < self.regstart:
             await asyncio.sleep(max((self.regstart - now).total_seconds(), 0.0))
 
