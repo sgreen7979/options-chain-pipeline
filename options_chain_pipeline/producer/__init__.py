@@ -6,16 +6,14 @@ import datetime as dt
 import gzip
 import json
 import sys
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    Optional,
-    Tuple,
-    TYPE_CHECKING,
-    Union,
-)
+from typing import Any
+from typing import Callable
+from typing import Dict
+from typing import List
+from typing import Optional
+from typing import Tuple
+from typing import TYPE_CHECKING
+from typing import Union
 
 from options_chain_pipeline.lib import FundamentalsLoader
 from options_chain_pipeline.lib.market_hours import functions as mh
