@@ -158,7 +158,14 @@ class OptionsChainProducer(BaseKafkaProducer):
             return regstart, regend
 
     def _validate_chain_response_data(self, resp_data: Dict) -> bool:
-        return (resp_data or {}).get("status") == "SUCCESS"
+        resp_data = resp_data or {}
+        if not resp_data:
+            return False
+        return (
+            resp_data.get("status") == "SUCCESS"
+            and bool(resp_data.get("callExpDateMap"))
+            and bool(resp_data.get("putExpDateMap"))
+        )
 
     def _handle_data(self, data: Dict):
         if symbol := data.get("symbol"):
