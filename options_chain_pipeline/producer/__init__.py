@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 import argparse
 import asyncio
-from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 import datetime as dt
 import gzip
@@ -44,7 +43,6 @@ KAFKA_CONFIG = {
     "compression_type": 'gzip',
     "value_serializer": lambda v: gzip.compress(json.dumps(v).encode('utf-8')),
 }
-MAX_WORKERS_EXECUTOR = 20
 
 # Logging setup
 LOG_LEVEL = "DEBUG"
