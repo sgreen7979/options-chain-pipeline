@@ -1,10 +1,10 @@
-#!/usr/bin/env python3
 # Adapted from https://github.com/areed1192/td-ameritrade-python-api by Alex Reed
 import asyncio
 import datetime as dt
 import json
 import os
 import threading
+import time
 from types import TracebackType
 from typing import Dict
 from typing import List
@@ -14,16 +14,16 @@ from typing import TYPE_CHECKING
 from typing import Union
 import requests
 
-from options_chain_pipeline.lib.utils.logging import get_logger
+from daily.utils.logging import get_logger
 
 from ..credentials.functions import get_credentials
 from ..option_chain import OptionChain as OptionsChainParams
 from .. import exceptions as exc
-from ..exceptions import _extract_params_from_url
-
 from .base import BaseSchwabClient
 from .capacity import CapacityLimiterMixin
+from .live import LiveMixin
 from .meta import SchwabClientMeta
+from daily.utils.requests_dataclasses import _extract_params_from_url
 
 if TYPE_CHECKING:
     from ..credentials import SchwabCredentials
@@ -31,13 +31,15 @@ if TYPE_CHECKING:
 
 
 logger = get_logger(
-    __name__ if __name__ != "__main__" else "options_chain_pipeline.lib.schwab.client.SchwabClient",
+    __name__ if __name__ != "__main__" else "daily.schwab.client.SchwabClient",
     fh=True,
     fh_level="DEBUG",
 )
 
 
-class SchwabClient(CapacityLimiterMixin, BaseSchwabClient, metaclass=SchwabClientMeta):
+class SchwabClient(
+    CapacityLimiterMixin, LiveMixin, BaseSchwabClient, metaclass=SchwabClientMeta
+):
     """Schwab API Client Class.
 
     Implements OAuth 2.0 Authorization Co-de Grant workflow, handles configuration
@@ -56,6 +58,7 @@ class SchwabClient(CapacityLimiterMixin, BaseSchwabClient, metaclass=SchwabClien
         account_number: Optional[str] = None,
         auth_flow: str = "default",
         _do_init: bool = True,
+        event: Optional[threading.Event] = None,
     ) -> None:
         """
         ### Usage:
@@ -81,11 +84,13 @@ class SchwabClient(CapacityLimiterMixin, BaseSchwabClient, metaclass=SchwabClien
             _do_init,
         )
         CapacityLimiterMixin.__init__(self)
+        LiveMixin.__init__(self)
 
         self.idx = idx
         self._lock = threading.RLock()
         self._alock = asyncio.Lock()
         self._entered: bool = False
+        self._future_queue: List[asyncio.Future] = []
         logger.info("SchwabClient initialized")
 
     def __enter__(self):
@@ -331,7 +336,7 @@ class SchwabClient(CapacityLimiterMixin, BaseSchwabClient, metaclass=SchwabClien
             else:
                 order_id = ""
 
-            return {
+            ret = {
                 "order_id": order_id,
                 "headers": response.headers,
                 "content": response.content,
@@ -339,6 +344,7 @@ class SchwabClient(CapacityLimiterMixin, BaseSchwabClient, metaclass=SchwabClien
                 "request_body": request_request.body,
                 "request_method": request_request.method,
             }
+            return ret
         else:
 
             resp_json = response.json()
@@ -347,6 +353,71 @@ class SchwabClient(CapacityLimiterMixin, BaseSchwabClient, metaclass=SchwabClien
             if incl_response:
                 resp_json["response"] = response
             return resp_json
+
+    def schedule_request(
+        self,
+        method: str,
+        endpoint: str,
+        mode: Optional[str] = None,
+        params: Optional[Dict] = None,
+        data: Optional[Dict] = None,
+        json: Optional[Dict] = None,
+        order_details: bool = False,
+        incl_fetch_time: bool = False,
+        multi: Optional[int] = None,
+        incl_response: bool = False,
+        delay: Optional[float] = None,
+    ) -> asyncio.Future:
+        now = time.time()
+
+        request_times = self.get_request_times()
+
+        # If we're at the request limit, wait until we can make another request
+        if delay:
+            time.sleep(delay)
+        elif len(request_times) >= self.rolling_capacity:
+            delay = 60.0 - (now - request_times[0])
+            time.sleep(delay)
+
+        future = asyncio.Future()
+        self._future_queue.append(future)
+
+        def callback(fut):
+            self._future_queue.remove(fut)
+
+        future.add_done_callback(callback)
+        task = asyncio.create_task(
+            self._amake_request(
+                future,
+                method,
+                endpoint,
+                mode=mode,
+                params=params,
+                data=data,
+                json=json,
+                order_details=order_details,
+                incl_fetch_time=incl_fetch_time,
+                multi=multi,
+                incl_response=incl_response,
+            )
+        )
+        return future
+
+    @property
+    def num_futures_queued(self):
+        self._future_queue = [
+            fut
+            for fut in self._future_queue
+            if (not fut.done()) or (not fut.cancelled())
+        ]
+        return len(self._future_queue)
+
+    async def _amake_request(self, future: asyncio.Future, *args, **kwargs):
+        try:
+            result = self._make_request(*args, **kwargs)
+            future.set_result(result)
+        except Exception as e:
+            future.set_exception(e)
 
     def _handle_request_error(
         self, response: requests.Response, request: requests.PreparedRequest
@@ -380,92 +451,6 @@ class SchwabClient(CapacityLimiterMixin, BaseSchwabClient, metaclass=SchwabClien
             raise exc.GeneralError(message=message)
         else:
             raise exc.GeneralError(message=message)
-
-    # def _make_request(
-    #     self,
-    #     method: str,
-    #     endpoint: str,
-    #     mode: Optional[st\ n  ] = None,
-    #     params: Optional[dict] = None,
-    #     data: Optional[dict] = None,
-    #     json: Optional[dict] = None,
-    #     order_details: bool = False,
-    #     incl_fetch_time: bool = False,
-    #     multi: Optional[int] = None,
-    # ) -> dict:
-    #     url = self._api_endpoint(endpoint=endpoint)
-    #     # Make sure the token is valid if it's not a Token API call.
-    #     self.validate_tokens()
-    #     headers = self._create_request_headers(mode=mode)
-
-    #     # logging.info(f"Request URL: {url}")
-    #     # logging.info(f"the headers: {headers}")
-    #     # logging.info(f"the params: {params}")
-
-    #     # Re-use session.
-    #     request_session = self.request_session or requests.Session()
-    #     # request_session = self.request_session
-
-    #     # Define a new request.
-    #     request_request = requests.Request(
-    #         method=method.upper(),
-    #         headers=headers,
-    #         url=url,
-    #         params=params,
-    #         data=data,
-    #         json=json,
-    #     ).prepare()
-
-    #     # Send the request and capture the fetch time
-    #     fetch_time = dt.datetime.now()
-    #     response = request_session.send(request=request_request, timeout=15)
-    #     fetch_time = fetch_time + response.elapsed
-    #     ts = fetch_time.timestamp()
-
-    #     # report fetch time(s) to redis
-    #     if multi is not None:
-    #         rts = [ts for _ in range(multi)]
-    #         self.add_request_timestamps(rts)
-    #     else:
-    #         self.add_request_timestamp(ts)
-
-    #     # grab the status code
-    #     status_code = response.status_code
-
-    #     if not response.ok:
-    #         logger.error(f"make_requests error = {response.text}")
-    #         if "refresh" in response.text and "expired" in response.text:
-    #             # already passed validate_tokens for expirations so calculated time must be off...?
-    #             try:
-    #                 logger.error("oauth called from _make_request")
-    #                 self.oauth()
-    #             except Exception as e:
-    #                 raise exc.GeneralError(message=response.text) from e
-    #         else:
-    #             self._handle_request_error(response)
-    #     # else:  # Then response is OK
-    #     response_headers = response.headers
-    #     # Grab the order id, if it exists.
-    #     if "Location" in response_headers:
-    #         order_id = response_headers["Location"].split("orders/")[1]
-    #     else:
-    #         order_id = ""
-
-    #     # Return response data
-    #     if order_details:
-    #         return {
-    #             "order_id": order_id,
-    #             "headers": response.headers,
-    #             "content": response.content,
-    #             "status_code": status_code,
-    #             "request_body": request_request.body,
-    #             "request_method": request_request.method,
-    #         }
-    #     else:
-    #         resp_json = response.json()
-    #         if incl_fetch_time:
-    #             resp_json["fetchTime"] = fetch_time.isoformat()
-    #         return resp_json
 
     def get_quotes(
         self,

@@ -7,37 +7,26 @@ import datetime as dt
 import gzip
 import json
 import sys
-import time
-from typing import Any
-from typing import Callable
-from typing import Coroutine
-from typing import Dict
-from typing import List
-from typing import Optional
-from typing import Tuple
-from typing import TYPE_CHECKING
-from typing import Union
-
-from options_chain_pipeline.lib import (
-    FundamentalsLoader,
-    get_hour, fetch_today, isOpen,
-    ReadTimeoutError, UnexpectedTokenAuthError,
-    OptionChain as OptionsChainParams,
-    get_options_universe,
-    get_logger
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Tuple,
+    TYPE_CHECKING,
+    Union,
 )
-# from options_chain_pipeline.lib import FundamentalsLoader
-# from options_chain_pipeline.lib import get_hour, fetch_today, isOpen
-# from options_chain_pipeline.lib import ReadTimeoutError
-# from options_chain_pipeline.lib import UnexpectedTokenAuthError
-# from options_chain_pipeline.lib import OptionChain as OptionsChainParams
-# from options_chain_pipeline.lib import get_options_universe
-# from options_chain_pipeline.lib import get_logger
 
-from .base_producer import BaseKafkaProducer
+from daily.fundamental.loader import FundamentalsLoader
+from daily.market_hrs import functions as mh
+from daily.schwab.base_producer import BaseKafkaProducer
+from daily.schwab.option_chain import OptionChain as OptionsChainParams
+from daily.symbols import get_options_universe
+from daily.utils.logging import get_logger
 
 if TYPE_CHECKING:
-    from options_chain_pipeline.lib import SchwabClient
+    from daily.schwab.client import SchwabClient
     from logging import Logger
 
 # Configuration
@@ -46,7 +35,7 @@ KAFKA_TOPIC = "option_chain_topic"
 KAFKA_NUM_PARTITIONS = 5
 KAFKA_REPLICATION_FACTOR = 1
 KAFKA_CONFIG = {
-    "topic_prefix": KAFKA_TOPIC,
+    "topic_prefix": "option_chain_topic",
     "bootstrap_servers": KAFKA_BOOTSTRAP_SERVERS,
     "num_partitions": KAFKA_NUM_PARTITIONS,
     "replication_factor": KAFKA_REPLICATION_FACTOR,
@@ -59,7 +48,7 @@ MAX_WORKERS_EXECUTOR = 20
 # Logging setup
 LOG_LEVEL = "DEBUG"
 logger = get_logger(
-    "options_chain_pipeline.producer" if __name__ == "__main__" else __name__,
+    "daily.schwab.options_producer" if __name__ == "__main__" else __name__,
     level=LOG_LEVEL,
     ch=True,
     ch_level="INFO",
@@ -96,6 +85,9 @@ class OptionsChainProducer(BaseKafkaProducer):
             value_serializer=self._kafka_config.get("value_serializer"),
             max_request_size=self._kafka_config.get("max_request_size", 1_048_576),
         )
+        if "GME" not in self._symbols:
+            logger.warning("GME EXCLUDED FROM OPTIONS UNIVERSE; adding it manually")
+            self._symbols.append("GME")
 
         self.request_params = chain_req_params.query_parameters
         self._sink = sink
@@ -105,11 +97,12 @@ class OptionsChainProducer(BaseKafkaProducer):
         else:
             self.fundamentals = FundamentalsLoader(self._symbols, self.clients).fetch()
 
-        # For testing purposes, it is safer getting and setting our hours after
-        # the upfront work in fetching dividendAmounts
         self.regstart, self.regend = self._get_hours(
             regstart, regend, test, test_time_minutes
         )
+
+        for client in self.clients:
+            client.set_callback(self._handle_data)
 
         logger.info(f"regstart: {self.regstart.isoformat()}")
         logger.info(f"regend: {self.regend.isoformat()}")
@@ -129,7 +122,7 @@ class OptionsChainProducer(BaseKafkaProducer):
     def cleanup(self):
         self.fundamentals._clear_cache()
         super().cleanup()
-      
+
     def add_symbol(self, symbol: str) -> None:
         super().add_symbol(symbol)
         self.fundamentals.fetch([symbol])
@@ -159,128 +152,44 @@ class OptionsChainProducer(BaseKafkaProducer):
             logger.info(f"Testing for {test_time_minutes} minutes")
             return regstart, regend
         else:
-            hours = fetch_today()
+            hours = mh.fetch_today()
 
-            if not isOpen(hours, "option"):
+            if not mh.isOpen(hours, "option"):
                 logger.error("Options markets are closed.")
                 self.cleanup()
                 sys.exit(-1)
 
             return (
-                get_hour(hours, "$.option.EQO.sessionHours.regularMarket[0].start"),
-                get_hour(hours, "$.option.IND.sessionHours.regularMarket[0].end"),
+                mh.get_hour(hours, "$.option.EQO.sessionHours.regularMarket[0].start"),
+                mh.get_hour(hours, "$.option.IND.sessionHours.regularMarket[0].end"),
             )
 
     def _validate_chain_response_data(self, resp_data: Dict) -> bool:
         return (resp_data or {}).get("status") == "SUCCESS"
 
-    def get_options_chain(self, client: "SchwabClient", symbol: str) -> Dict:
-        params = self._get_params(symbol)
-        try:
-            return client.get_options_chain(params)
-        except UnexpectedTokenAuthError as e:
-            client.get_logger().error(e)
-            logger.error(str(e))
-            run_at = dt.datetime.now() + dt.timedelta(seconds=15)
-            self.clients.schedule_request(
-                "options_chain", params, self._handle_data, run_at=run_at
-            )
-            return {
-                "status": "FAILURE",
-                "error": e,
-                "fetchTime": e.fetch_time,
-                "response": e.response,
-                "symbol": symbol,
-                "client": client,
-            }
-        except ReadTimeoutError as e:
-            client.get_logger().error(e)
-            logger.error(str(e))
-            run_at = dt.datetime.now() + dt.timedelta(seconds=15)
-            self.clients.schedule_request(
-                "options_chain", params, self._handle_data, run_at=run_at
-            )
-            return {
-                "status": "FAILURE",
-                "error": e.message,
-                "fetchTime": e.fetch_time,
-                "prepared_request": e.prepared_request,
-                "symbol": symbol,
-                "client": client,
-            }
-        except Exception as e:
-            client.get_logger().error(e)
-            logger.error(str(e))
-            return {
-                "status": "FAILURE",
-                "error": e,
-                "fetchTime": dt.datetime.now(),
-                "symbol": symbol,
-                "client": client,
-            }
-
-    def _handle_data(self, data: Dict, idx: int, metadata: Optional[Dict] = None):
-        symbol = data.get("symbol", "")
-        if "error" in data:
-            logger.error(data["error"])
-
-        if self._validate_chain_response_data(data):
-            data["dividendAmount"] = self.fundamentals.get(symbol)
-            if "response" in data:
-                del data["response"]
-            self._to_kafka(symbol, data)
+    def _handle_data(self, data: Dict):
+        if symbol := data.get("symbol"):
+            if self._validate_chain_response_data(data):
+                data["dividendAmount"] = self.fundamentals.get(symbol)
+                if "response" in data:
+                    del data["response"]
+                self.loop.call_soon(self._to_kafka, symbol, data)
+            else:
+                logger.error(f"Invalid request data {symbol}")
+                if self._running and self._round_trip <= 1 and symbol != "GME":
+                    self.remove_symbol(symbol)
         else:
-            logger.error(f"Invalid request data {symbol}")
-            if self._running and self._round_trip <= 1 and symbol != "GME":
-                self.remove_symbol(symbol)
-
-    async def async_fetch(
-        self,
-        client: "SchwabClient",
-        symbol: str,
-        executor: "ThreadPoolExecutor",
-        metadata: Optional[Dict] = None,
-    ) -> Optional[Dict]:
-        loop = asyncio.get_running_loop()
-
-        logger.debug(f"Fetching option chain data {symbol} (client_idx={client.idx})")
-        data = await loop.run_in_executor(
-            executor, self.get_options_chain, client, symbol
-        )
-
-        if self._validate_chain_response_data(data):
-            data["dividendAmount"] = self.fundamentals.get(symbol)
-            if "response" in data:
-                del data["response"]
-            loop.call_soon(self._to_kafka, symbol, data)
-            # self._to_kafka(symbol, data)
-        else:
-            logger.error(f"Invalid request data {symbol}")
-            if self._running and self._round_trip <= 1:
-                self.remove_symbol(symbol)
+            dumps = json.dumps(data, indent=4)
+            self.get_logger().error(f"Request error {dumps}")
 
     def _get_params(self, symbol: str) -> Dict[str, Any]:
         params = deepcopy(self.request_params)
         params.update({"symbol": symbol})
         return params
 
-    async def _submit(self, tasks: List[Coroutine]):
-        await asyncio.gather(*tasks)
-
-    async def _in_executor(
-        self,
-        client: "SchwabClient",
-        symbols: List[str],
-        meth: Optional[Callable] = None,
-    ):
-        meth = meth or self.async_fetch
-        max_workers = MAX_WORKERS_EXECUTOR
-        with ThreadPoolExecutor(max_workers) as executor:
-            tasks = [meth(client, symbol, executor) for symbol in symbols]
-            await self._submit(tasks)
-
     async def run(self) -> None:
         self._ran = True
+        self._total_requests = 0
 
         now = dt.datetime.now()
         if now > self.regend:
@@ -288,43 +197,50 @@ class OptionsChainProducer(BaseKafkaProducer):
             self.cleanup()
             return
 
-        self._running = True
         if now < self.regstart:
             await asyncio.sleep(max((self.regstart - now).total_seconds(), 0.0))
 
+        self._running = True
         logger.info("Running OptionsChainProducer")
+        self.loop = asyncio.get_event_loop()
+        self.clients.start(self.loop)
+
         while dt.datetime.now() < self.regend:
-            if not self._symbols:
-                logger.error("self._symbols is empty")
-                await asyncio.sleep(30)
-                continue
+            expected_request_count = self.expected_request_count
+            if self._total_requests <= expected_request_count:
+                self._round_trip += 1
+                
+                if (
+                    dt.datetime.now() + dt.timedelta(minutes=self.round_trip_time)
+                    > self.regend
+                ):
+                    logger.info(f"Starting FINAL round trip {self._round_trip}")
+                else:
+                    logger.info(f"Starting round trip {self._round_trip}")
 
-            self._round_trip += 1
-            self._batch_num = 0
+                symbols = self.symbols
+                end_time = (
+                    dt.datetime.now() + dt.timedelta(minutes=self.round_trip_time)
+                ).timestamp()
 
-            if (
-                dt.datetime.now() + dt.timedelta(minutes=self.round_trip_time)
-                > self.regend
-            ):
-                logger.info(f"Starting FINAL round trip {self._round_trip}")
-            else:
-                logger.info(f"Starting round trip {self._round_trip}")
+                for symbol in symbols:
+                    self.get_logger().info(f"Scheduling request {symbol}")
+                    
+                    await self.clients.schedule_request(
+                        method="get",
+                        endpoint="marketdata/v1/chains",
+                        params=self._get_params(symbol),
+                        incl_fetch_time=True,
+                    )
+                    
+                    self._total_requests += 1
+                
+                sleep_time = end_time - dt.datetime.now().timestamp() - 10.0
+                self.get_logger().info(
+                    f"Completed round trip {self._round_trip}, sleeping for ~{int(round(sleep_time / 60, 0))} minutes"
+                )
+                await asyncio.sleep(sleep_time)
 
-            symbols = self.symbols
-            start_time = time.perf_counter()
-            while symbols:
-                client = self.clients._await_client_with_capacity(incl_queued=True)
-                capacity_used = min(client.get_capacity(incl_queued=True), len(symbols))
-                batch = symbols[:capacity_used]
-                self._batch_num += 1
-                await self._in_executor(client, batch)
-                symbols = symbols[capacity_used:]
-            end_time = time.perf_counter()
-            elapsed = int((end_time - start_time) // 60.0)
-            logger.info(
-                f"Completed round trip {self._round_trip} in ~{elapsed} minutes"
-            )
-            await asyncio.sleep(0.25)
         self._running = False
         logger.info("Options markets are closed.")
         self.cleanup()
@@ -333,8 +249,11 @@ class OptionsChainProducer(BaseKafkaProducer):
 def parse_hours(date_string):
     try:
         return dt.datetime.fromisoformat(date_string)
-    except:
-        return dt.datetime.fromtimestamp(float(date_string))
+    except ValueError as e:
+        try:
+            return dt.datetime.fromtimestamp(float(date_string))
+        except TypeError as ee:
+            raise ee from e
 
 
 def parse_args():
@@ -349,12 +268,13 @@ def parse_args():
 
 def main():
     args = parse_args()
+    chain_request_params = OptionsChainParams(
+        symbol="<symbol>",
+        include_quotes=True,
+        strategy=OptionsChainParams.Strategy.ANALYTICAL,
+    )
     producer = OptionsChainProducer(
-        OptionsChainParams(
-            symbol="<symbol>",
-            include_quotes=True,
-            strategy=OptionsChainParams.Strategy.ANALYTICAL,
-        ),
+        chain_request_params,
         get_options_universe,
         test=args.test,
         test_time_minutes=args.test_time,
