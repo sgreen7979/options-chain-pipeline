@@ -82,9 +82,6 @@ class OptionsChainProducer(BaseKafkaProducer):
             value_serializer=self._kafka_config.get("value_serializer"),
             max_request_size=self._kafka_config.get("max_request_size", 1_048_576),
         )
-        if "GME" not in self._symbols:
-            logger.warning("GME EXCLUDED FROM OPTIONS UNIVERSE; adding it manually")
-            self._symbols.append("GME")
 
         self.request_params = chain_req_params.query_parameters
         self._sink = sink
@@ -173,7 +170,7 @@ class OptionsChainProducer(BaseKafkaProducer):
                 self.loop.call_soon(self._to_kafka, symbol, data)
             else:
                 logger.error(f"Invalid request data {symbol}")
-                if self._running and self._round_trip <= 1 and symbol != "GME":
+                if self._running and self._round_trip <= 1:
                     self.remove_symbol(symbol)
         else:
             dumps = json.dumps(data, indent=4)
