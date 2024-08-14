@@ -334,7 +334,7 @@ class SchwabClient(
             else:
                 order_id = ""
 
-            ret = {
+            return {
                 "order_id": order_id,
                 "headers": response.headers,
                 "content": response.content,
@@ -342,7 +342,6 @@ class SchwabClient(
                 "request_body": request_request.body,
                 "request_method": request_request.method,
             }
-            return ret
         else:
 
             resp_json = response.json()
