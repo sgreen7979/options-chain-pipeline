@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 from contextlib import contextmanager
 import datetime as dt
+import itertools
 import json
 import threading
 import time
-from typing import Callable
 from typing import ClassVar
 from typing import Dict
 from typing import List
@@ -12,6 +12,7 @@ from typing import Optional
 from typing import Set
 from typing import Tuple
 from typing import TYPE_CHECKING
+from typing import Union
 
 from redis import Redis
 
@@ -33,6 +34,7 @@ redis = Redis()
 
 class ClientGroup(metaclass=StrictSingleton):
     _lock: ClassVar[threading.RLock] = threading.RLock()
+    # _client_facotory: ClassVar[type["SchwabClient"]] = SchwabClient
 
     @contextmanager
     @classmethod
@@ -48,6 +50,19 @@ class ClientGroup(metaclass=StrictSingleton):
 
     def __init__(self, clients: Optional[List["SchwabClient"]] = None) -> None:
         self._clients = clients or self._get_clients()
+        self.idx_cycle = itertools.cycle([c.idx for c in self._clients])
+        logger.info("Initializing ClientGroup")
+
+    @staticmethod
+    def get_logger():
+        return logger
+
+    def log_updates(self):
+        while True:
+            time.sleep(120)
+            self.get_logger().info(
+                json.dumps(self.get_capacity_summary(incl_queued=True), indent=4)
+            )
 
     def _create_client(
         self, credentials: "SchwabCredentials"
@@ -96,10 +111,6 @@ class ClientGroup(metaclass=StrictSingleton):
             client = self._clients[wait_times.index(min_wait_time)]
             return client
 
-    @property
-    def next(self):
-        return self._get_next_client_with_capacity(incl_queued=False)
-
     @contextmanager
     def await_next_client(self, incl_queued: bool = False):
         with ClientGroup._lock:
@@ -141,7 +152,7 @@ class ClientGroup(metaclass=StrictSingleton):
             return json.dumps(obj.decode())
         elif isinstance(obj, (dt.date, dt.datetime)):
             return json.dumps(obj.isoformat())
-        elif isinstance(obj, dt.timedelta):
+        elif isinstance(obj, (dt.timedelta)):
             return json.dumps(obj.total_seconds())
         elif isinstance(obj, Dict):
             return json.dumps(
@@ -152,23 +163,48 @@ class ClientGroup(metaclass=StrictSingleton):
         else:
             return str(obj)
 
-    def schedule_request(
+    def get_client_by_idx(self, idx: int):
+        return list(filter(lambda c: c.idx == idx, self._clients))[0]
+
+    # def schedule_request(self, client: "SchwabClient", params: Dict, service: str):
+    async def schedule_request(
         self,
-        service: str,
-        params: Dict,
-        handler: Callable,
-        client: Optional["SchwabClient"] = None,
-        run_at: Optional["dt.datetime"] = None,
+        method: str,
+        endpoint: str,
+        mode: Optional[str] = None,
+        params: Optional[Dict[str, Union[str, bool]]] = None,
+        data: Optional[Dict[str, str]] = None,
+        _json: Optional[Dict[str, str]] = None,
+        order_details: bool = False,
+        incl_fetch_time: bool = False,
+        multi: Optional[int] = None,
+        incl_response: bool = False,
+        delay: Optional[float] = None,
+        priority: Optional[int] = None,
     ):
-        run_at_iso = (dt.datetime.now() if run_at is None else run_at).isoformat()
-        req_dict_dumps = json.dumps(
-            {"service": service, "params": json.dumps(params), "run_at": run_at_iso}
-        )
-        if client is None:
-            client = self._get_next_client_with_capacity()
-        redis_key = client.redis_key_req_queue
-        redis.rpush(redis_key, req_dict_dumps)
-        client._consume_queue(handler=handler)
+        req_dict = {
+            "method": method,
+            "endpoint": endpoint,
+            "mode": mode,
+            "params": json.dumps(params) if params else params,
+            "data": json.dumps(data) if data else data,
+            "json": json.dumps(_json) if _json else _json,
+            "order_details": order_details,
+            "incl_fetch_time": incl_fetch_time,
+            "multi": multi,
+            "incl_response": incl_response,
+            "delay": delay,
+        }
+        dumps = json.dumps(req_dict)
+        idx = next(self.idx_cycle)
+        client = self.get_client_by_idx(idx)
+
+        if priority is not None and priority == self.Priority.URGENT:
+            client.event.set()
+            redis.lpush(client.redis_key_req_queue, dumps)
+            client.event.clear()
+        else:
+            redis.rpush(client.redis_key_req_queue, dumps)
 
     def __len__(self) -> int:
         return len(self._clients)
@@ -210,7 +246,7 @@ class ClientGroup(metaclass=StrictSingleton):
             c.idx: {
                 "capacity_used": c.capacity_used,
                 "capacity_queued": 0 if not incl_queued else c.capacity_queued,
-                "next_availability": c.get_next_datetime(incl_queued).isoformat(),
+                "next_availability": c.get_next_datetime(False).isoformat(),
             }
             for c in self._clients
         }
@@ -218,3 +254,16 @@ class ClientGroup(metaclass=StrictSingleton):
     @property
     def rolling_capacity(self) -> int:
         return sum(c.rolling_capacity for c in self._clients)
+
+    def start(self, loop):
+        self._start_time = time.time()
+        threading.Thread(target=self.log_updates).start()
+        for client in self._clients:
+            client.set_loop(loop)
+            client.start()
+
+    class Priority(IntEnum):
+        BELOW_NORMAL = 0
+        NORMAL = 10
+        ABOVE_NORMAL = 30
+        URGENT = 40
