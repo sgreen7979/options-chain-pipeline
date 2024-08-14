@@ -31,11 +31,11 @@ if TYPE_CHECKING:
 
 # Configuration
 KAFKA_BOOTSTRAP_SERVERS = "localhost:9093"
-KAFKA_TOPIC = "option_chain_topic"
+KAFKA_TOPIC_PREFIX = "option_chain_topic"
 KAFKA_NUM_PARTITIONS = 5
 KAFKA_REPLICATION_FACTOR = 1
 KAFKA_CONFIG = {
-    "topic_prefix": KAFKA_TOPIC,
+    "topic_prefix": KAFKA_TOPIC_PREFIX,
     "bootstrap_servers": KAFKA_BOOTSTRAP_SERVERS,
     "num_partitions": KAFKA_NUM_PARTITIONS,
     "replication_factor": KAFKA_REPLICATION_FACTOR,
