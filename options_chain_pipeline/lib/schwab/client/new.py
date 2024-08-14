@@ -14,16 +14,16 @@ from typing import TYPE_CHECKING
 from typing import Union
 import requests
 
-from daily.utils.logging import get_logger
+from options_chain_pipeline.lib.utils.logging import get_logger
 
 from ..credentials.functions import get_credentials
-from ..option_chain import OptionChain as OptionsChainParams
 from .. import exceptions as exc
+from ..exceptions import _extract_params_from_url
+from ..option_chain import OptionChain as OptionsChainParams
 from .base import BaseSchwabClient
 from .capacity import CapacityLimiterMixin
 from .live import LiveMixin
 from .meta import SchwabClientMeta
-from daily.utils.requests_dataclasses import _extract_params_from_url
 
 if TYPE_CHECKING:
     from ..credentials import SchwabCredentials
@@ -425,15 +425,11 @@ class SchwabClient(
         response_text = response.text
         params = _extract_params_from_url(request.url)
         endpoint = request.path_url.split("?")[0]
-        # response_text = (
-        #     f"{response.text[:-1]},\"params\":{json.dumps(params)},\"path_url\":{json.dumps(request.path_url)}"
-        #     + "}"
-        # )
         response_text = (
             f"{response_text[:-1]},\"params\":{json.dumps(params)},\"endpoint\":{json.dumps(endpoint)}"
             + "}"
         )
-        # message = f"[{response.status_code}]: {response.text}"
+        
         message = f"[{response.status_code}]: {response_text}"
         if response.status_code == 400:
             raise exc.NotNulError(message=message)
@@ -546,16 +542,6 @@ class SchwabClient(
             params=params,
             incl_fetch_time=True,
             incl_response=True,
-        )
-
-    @classmethod
-    def from_account(cls, account: "Account"):
-        return cls(
-            account.api_key,
-            account.secret,
-            account.redirect_uri,
-            account.token_path,
-            account.idx,
         )
 
     @classmethod
