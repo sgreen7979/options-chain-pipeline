@@ -9,8 +9,9 @@ from typing import List
 from typing import Optional
 from typing import TYPE_CHECKING
 from typing import Union
-import requests
 import urllib.parse
+
+import requests
 
 from options_chain_pipeline.lib.utils.logging import get_logger
 
