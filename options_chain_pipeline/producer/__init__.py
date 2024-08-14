@@ -18,15 +18,16 @@ from typing import (
     Union,
 )
 
-from daily.fundamental.loader import FundamentalsLoader
-from daily.market_hrs import functions as mh
-from daily.schwab.base_producer import BaseKafkaProducer
-from daily.schwab.option_chain import OptionChain as OptionsChainParams
-from daily.symbols import get_options_universe
-from daily.utils.logging import get_logger
+from options_chain_pipeline.lib import FundamentalsLoader
+from options_chain_pipeline.lib.market_hours import functions as mh
+from options_chain_pipeline.lib.schwab.option_chain import OptionChain as OptionsChainParams
+from options_chain_pipeline.lib import get_options_universe
+from options_chain_pipeline.lib import get_logger
+
+from .base_producer import BaseKafkaProducer
 
 if TYPE_CHECKING:
-    from daily.schwab.client import SchwabClient
+    from options_chain.pipeline.lib import SchwabClient
     from logging import Logger
 
 # Configuration
@@ -35,7 +36,7 @@ KAFKA_TOPIC = "option_chain_topic"
 KAFKA_NUM_PARTITIONS = 5
 KAFKA_REPLICATION_FACTOR = 1
 KAFKA_CONFIG = {
-    "topic_prefix": "option_chain_topic",
+    "topic_prefix": KAFKA_TOPIC,
     "bootstrap_servers": KAFKA_BOOTSTRAP_SERVERS,
     "num_partitions": KAFKA_NUM_PARTITIONS,
     "replication_factor": KAFKA_REPLICATION_FACTOR,
