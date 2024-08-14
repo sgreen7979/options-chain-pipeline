@@ -247,5 +247,5 @@ class ClientGroup(metaclass=StrictSingleton):
     class Priority(IntEnum):
         BELOW_NORMAL = 0
         NORMAL = 10
-        ABOVE_NORMAL = 30
-        URGENT = 40
+        ABOVE_NORMAL = 20
+        URGENT = 30
