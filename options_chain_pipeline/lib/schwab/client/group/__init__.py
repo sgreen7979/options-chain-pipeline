@@ -145,24 +145,6 @@ class ClientGroup(metaclass=StrictSingleton):
             )
         return proj_sched
 
-    def _recursive_json_dumps(self, obj):
-        if isinstance(obj, (str, int, float, bool)):
-            return json.dumps(obj)
-        elif isinstance(obj, bytes):
-            return json.dumps(obj.decode())
-        elif isinstance(obj, (dt.date, dt.datetime)):
-            return json.dumps(obj.isoformat())
-        elif isinstance(obj, (dt.timedelta)):
-            return json.dumps(obj.total_seconds())
-        elif isinstance(obj, Dict):
-            return json.dumps(
-                {k: self._recursive_json_dumps(v) for k, v in obj.items()}
-            )
-        elif isinstance(obj, (Tuple, List, Set)):
-            return json.dumps(type(obj)(self._recursive_json_dumps(i) for i in obj))
-        else:
-            return str(obj)
-
     def get_client_by_idx(self, idx: int):
         return list(filter(lambda c: c.idx == idx, self._clients))[0]
 
