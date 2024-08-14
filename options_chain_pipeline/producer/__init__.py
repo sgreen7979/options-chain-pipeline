@@ -153,10 +153,9 @@ class OptionsChainProducer(BaseKafkaProducer):
                 self.cleanup()
                 sys.exit(-1)
 
-            return (
-                mh.get_hour(hours, "$.option.EQO.sessionHours.regularMarket[0].start"),
-                mh.get_hour(hours, "$.option.IND.sessionHours.regularMarket[0].end"),
-            )
+            regstart = mh.get_hour(hours, "$.option.EQO.sessionHours.regularMarket[0].start")
+            regend = mh.get_hour(hours, "$.option.IND.sessionHours.regularMarket[0].end")
+            return regstart, regend
 
     def _validate_chain_response_data(self, resp_data: Dict) -> bool:
         return (resp_data or {}).get("status") == "SUCCESS"
