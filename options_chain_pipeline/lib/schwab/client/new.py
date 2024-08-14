@@ -91,7 +91,6 @@ class SchwabClient(
         self._lock = threading.RLock()
         self._alock = asyncio.Lock()
         self._entered: bool = False
-        self._future_queue: List[asyncio.Future] = []
         logger.info("SchwabClient initialized")
 
     def __enter__(self):
