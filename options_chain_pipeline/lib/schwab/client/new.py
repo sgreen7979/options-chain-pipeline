@@ -59,7 +59,6 @@ class SchwabClient(
         account_number: Optional[str] = None,
         auth_flow: str = "default",
         _do_init: bool = True,
-        event: Optional[threading.Event] = None,
     ) -> None:
         """
         ### Usage:
