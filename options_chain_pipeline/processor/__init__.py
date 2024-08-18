@@ -407,19 +407,19 @@ def main():
 if __name__ == "__main__":
     spark = (
         SparkSession.builder.appName(f"OptionsDataProcessor_{CURRENT_DATE}")  # type: ignore
+        .config("spark.driver.memory", "32g")
         .config("spark.executor.heartbeatInterval", "36000s")
-        .config("spark.network.timeout", "48000s")
-        .config("spark.eventLog.enabled", "true")
         .config("spark.eventLog.dir", EVENT_LOG_DIR)
+        .config("spark.eventLog.enabled", "true")
+        .config("spark.executor.memory", "64g")
         .config("spark.history.fs.logDirectory", HISTORY_LOG_DIR,)
         .config("spark.kafka.maxPartitionFetchBytes", 10_485_760)
-        .config("spark.streaming.kafka.maxRatePerPartition", 40)
-        .config("spark.sql.debug.maxToStringFields", "1000")
+        .config("spark.network.timeout", "48000s")
         .config("spark.sql.autoBroadcastJoinThreshold", "-1")
-        .config("spark.executor.memory", "64g")
-        .config("spark.driver.memory", "64g")
-        .config("spark.streaming.stopGracefullyOnShutdown", "true")
+        .config("spark.sql.debug.maxToStringFields", "1000")
         .config("spark.sql.execution.arrow.pyspark.enabled", "true")
+        .config("spark.streaming.kafka.maxRatePerPartition", 40)
+        .config("spark.streaming.stopGracefullyOnShutdown", "true")
         .getOrCreate()
     )
 
