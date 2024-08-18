@@ -67,8 +67,6 @@ HADOOP_HOME = os.environ["HADOOP_HOME"]
 CHECKPOINT_DIR = f"file:///{HADOOP_HOME}/data/hdfs/checkpoints/{CURRENT_DATE}"
 ERROR_PATH = f"file:///{HADOOP_HOME}/data/hdfs/sparkerrors/{CURRENT_DATE}"
 
-# Market hours
-
 # SQL Server configuration
 SQL_PORT = "1433"
 SQL_DATABASE_NAME = "options"
