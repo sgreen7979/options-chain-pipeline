@@ -47,7 +47,7 @@ if TYPE_CHECKING:
 # Logging setup
 LOG_LEVEL = "DEBUG"
 logger = get_logger(
-    "daily.schwab.options_processor" if __name__ == "__main__" else __name__,
+    "options_chain_pipline.processor" if __name__ == "__main__" else __name__,
     level=LOG_LEVEL,
     fh=True,
     fh_level="DEBUG",
