@@ -75,7 +75,7 @@ EVENT_LOG_DIR = HISTORY_LOG_DIR = f"file:///{SPARK_HOME}/spark-events"
 SQL_PORT = "1433"
 SQL_DATABASE_NAME = "options"
 SQL_SCHEMA_NAME = "chains"
-SOCKET_TIMEOUT = 36000
+SOCKET_TIMEOUT = 3600
 SQL_SERVER_URL = f"jdbc:sqlserver://{MSSQLConfig.PrimarySQLServer}:{MSSQLConfig.SQLServerPort};databaseName={SQL_DATABASE_NAME};SocketTimeout={SOCKET_TIMEOUT}"
 SQL_TABLE = "OptionsDataStaging"
 SQL_TABLE_NAME = f"{SQL_SCHEMA_NAME}.{SQL_TABLE}"
@@ -411,7 +411,7 @@ if __name__ == "__main__":
         .config("spark.executor.heartbeatInterval", "36000s")
         .config("spark.eventLog.dir", EVENT_LOG_DIR)
         .config("spark.eventLog.enabled", "true")
-        .config("spark.executor.memory", "64g")
+        .config("spark.executor.memory", "32g")
         .config("spark.history.fs.logDirectory", HISTORY_LOG_DIR)
         .config("spark.kafka.maxPartitionFetchBytes", 10_485_760)
         .config("spark.network.timeout", "48000s")
