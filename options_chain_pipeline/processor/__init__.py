@@ -30,16 +30,16 @@ from pyspark.sql.types import DecimalType
 from pyspark.sql.types import DoubleType
 from pyspark.sql.types import StringType
 
-from daily.market_hrs import functions as mh
-from daily.options.expirations import get_expiration_dates
-from daily.options.iv_engine import ImpliedVolatilityEngine
-from daily.options.mcal.parallel import MarketCalendar
-from daily.spark import MyListener
-from daily.spark import OptionsChainSchema
-from daily.sql.mssql import MSSQLClient
-from daily.sql.mssql import MSSQLConfig
-from daily.term_structure import SvenssonYieldTermStructure
-from daily.utils.logging import get_logger
+from options_chain_pipeline.lib.market_hours import functions as mh
+from options_chain_pipeline.lib import get_expiration_dates
+from options_chain_pipeline.lib import get_logger
+from options_chain_pipeline.lib import ImpliedVolatilityEngine
+from options_chain_pipeline.lib import MarketCalendar
+from options_chain_pipeline.lib import MyListener
+from options_chain_pipeline.lib import MSSQLClient
+from options_chain_pipeline.lib import MSSQLConfig
+from options_chain_pipeline.lib import OptionsChainSchema
+from options_chain_pipeline.lib import SvenssonYieldTermStructure
 
 if TYPE_CHECKING:
     from pyspark.sql import DataFrame
@@ -66,6 +66,10 @@ KAFKA_TOPIC = f"option_chain_topic_{CURRENT_DATE}"
 HADOOP_HOME = os.environ["HADOOP_HOME"]
 CHECKPOINT_DIR = f"file:///{HADOOP_HOME}/data/hdfs/checkpoints/{CURRENT_DATE}"
 ERROR_PATH = f"file:///{HADOOP_HOME}/data/hdfs/sparkerrors/{CURRENT_DATE}"
+
+# Spark paths
+SPARK_HOME = os.environ["SPARK_HOME"]
+EVENT_LOG_DIR = HISTORY_LOG_DIR = f"file:///{SPARK_HOME}/spark-events"
 
 # SQL Server configuration
 SQL_PORT = "1433"
@@ -405,23 +409,12 @@ if __name__ == "__main__":
         SparkSession.builder.appName(f"OptionsDataProcessor_{CURRENT_DATE}")  # type: ignore
         .config("spark.executor.heartbeatInterval", "36000s")
         .config("spark.network.timeout", "48000s")
-        .config(
-            "spark.sql.streaming.stateStore.providerClass",
-            "org.apache.spark.sql.execution.streaming.state.RocksDBStateStoreProvider",
-        )
         .config("spark.eventLog.enabled", "true")
-        .config(
-            "spark.eventLog.dir",
-            "file:///C:/Spark/spark-3.5.1-bin-hadoop3/spark-events",
-        )
-        .config(
-            "spark.history.fs.logDirectory",
-            "file:///C:/Spark/spark-3.5.1-bin-hadoop3/spark-events",
-        )
+        .config("spark.eventLog.dir", EVENT_LOG_DIR)
+        .config("spark.history.fs.logDirectory", HISTORY_LOG_DIR,)
         .config("spark.kafka.maxPartitionFetchBytes", 10_485_760)
         .config("spark.streaming.kafka.maxRatePerPartition", 40)
         .config("spark.sql.debug.maxToStringFields", "1000")
-        # .config("spark.sql.broadcastTimeout", "100000")
         .config("spark.sql.autoBroadcastJoinThreshold", "-1")
         .config("spark.executor.memory", "64g")
         .config("spark.driver.memory", "64g")
@@ -429,16 +422,7 @@ if __name__ == "__main__":
         .config("spark.sql.execution.arrow.pyspark.enabled", "true")
         .getOrCreate()
     )
-    # .config("spark.python.worker.reuse", "true")
-    # .config("spark.rpc.askTimeout", "2400s")
-    # .config(
-    #     "spark.driver.extraJavaOptions",
-    #     fr"-Dlog4j.configuration=file:C:\Users\green\daily\daily\spark\log4j.properties -Dlogfile.path={log_dir}",
-    # )
-    # .config(
-    #     "spark.executor.extraJavaOptions",
-    #     fr"-Dlog4j.configuration=file:C:\Users\green\daily\daily\spark\log4j.properties -Dlogfile.path={log_dir}",
-    # )
+
     assert isinstance(spark, SparkSession)
     spark.conf.set(
         "spark.sql.shuffle.partitions", spark.sparkContext.defaultParallelism
