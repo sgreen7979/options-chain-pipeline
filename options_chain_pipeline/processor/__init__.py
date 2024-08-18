@@ -412,7 +412,7 @@ if __name__ == "__main__":
         .config("spark.eventLog.dir", EVENT_LOG_DIR)
         .config("spark.eventLog.enabled", "true")
         .config("spark.executor.memory", "64g")
-        .config("spark.history.fs.logDirectory", HISTORY_LOG_DIR,)
+        .config("spark.history.fs.logDirectory", HISTORY_LOG_DIR)
         .config("spark.kafka.maxPartitionFetchBytes", 10_485_760)
         .config("spark.network.timeout", "48000s")
         .config("spark.sql.autoBroadcastJoinThreshold", "-1")
