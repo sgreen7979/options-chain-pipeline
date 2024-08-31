@@ -11,5 +11,5 @@ from .nelson_siegel import (
 from .piecewise import (
     PiecewiseLinearYieldTermStructure as PiecewiseLinearYieldTermStructure,
 )  # noqa
-from .svenson import SvenssonYieldTermStructure as SvenssonYieldTermStructure  # noqa
+from .svensson import SvenssonYieldTermStructure as SvenssonYieldTermStructure  # noqa
 from .util import continuously_compounding_rate as continuously_compounding_rate
