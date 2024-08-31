@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+"""
+NOTE
+There are a bunch of cleanup items here, like consistent 
+usage of the `cursor` attr of `MSSQLClient` and methods 
+without implementation like `MSSQLClient.create_table`.
+FIXME
+"""
 from abc import ABC
 from abc import abstractmethod
 import datetime
