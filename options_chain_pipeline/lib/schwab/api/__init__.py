@@ -1,0 +1,10 @@
+class Endpoints:
+    OptionsChain = "marketdata/v1/chains"
+    Quotes = "marketdata/v1/quotes"
+    Accounts = "trader/v1/accounts"
+    UserPreference = "trader/v1//userPreference"
+    Instruments = "marketdata/v1/instruments"
+    MarketHours = "marketdata/v1/markets"
+    Movers = "marketdata/v1/movers"
+    PriceHistory = "marketdata/v1/pricehistory"
+    ExpirationChain = "marketdata/v1/expirationchain"
