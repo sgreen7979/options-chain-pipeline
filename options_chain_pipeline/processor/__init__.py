@@ -453,18 +453,18 @@ if __name__ == "__main__":
 
     REGEND_EQO, REGEND_IND = get_session_hours()
 
-    def get_svennson_params():
-        svennson = SvenssonYieldTermStructure.without_data()
-        svennson_params = svennson.get_params()
-        beta0 = lit(svennson_params["beta0"])
-        beta1 = lit(svennson_params["beta1"])
-        beta2 = lit(svennson_params["beta2"])
-        beta3 = lit(svennson_params["beta3"])
-        tau1 = lit(svennson_params["tau1"])
-        tau2 = lit(svennson_params["tau2"])
+    def get_svensson_params():
+        svensson = SvenssonYieldTermStructure.without_data()
+        svensson_params = svensson.get_params()
+        beta0 = lit(svensson_params["beta0"])
+        beta1 = lit(svensson_params["beta1"])
+        beta2 = lit(svensson_params["beta2"])
+        beta3 = lit(svensson_params["beta3"])
+        tau1 = lit(svensson_params["tau1"])
+        tau2 = lit(svensson_params["tau2"])
         return beta0, beta1, beta2, beta3, tau1, tau2
 
-    BETA0, BETA1, BETA2, BETA3, TAU1, TAU2 = get_svennson_params()
+    BETA0, BETA1, BETA2, BETA3, TAU1, TAU2 = get_svensson_params()
 
     def get_market_schedule():
         market_schedule_pdf = MarketCalendar(start=TODAY).schedule
