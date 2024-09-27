@@ -6,5 +6,4 @@ This is a library that utilizes Schwab's API to continuously fetch new options c
 ## `options_chain_pipeline.lib`
 Contains all necessary functionality supporting each of the `options_chain_pipeline.producer` and `options_chain_pipeline.processor` libs.
 
-## Helpful info
-SMA, foo
+## 
