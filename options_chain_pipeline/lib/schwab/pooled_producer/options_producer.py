@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
 import argparse
 import asyncio
-import atexit
 from collections import defaultdict
-from contextvars import copy_context, Context
+from contextvars import copy_context
 import datetime as dt
 import itertools
-import json
 import os
 import tracemalloc
 from typing import (
@@ -17,16 +15,11 @@ from typing import (
     DefaultDict,
     Dict,
     List,
-    Literal,
     Optional,
-    TypedDict,
     Union,
-    Unpack,
-    cast,
 )
 
-import psutil
-from pydantic import Field
+from kafka.errors import KafkaError
 
 from daily.fundamental.loader import FundamentalsLoader
 from daily.symbols import get_options_universe, body_too_big
@@ -35,199 +28,33 @@ from daily.utils.profiling import init_profiler
 
 # import daily.utils.async_utils.event_loop as looppolicy
 
-from ..api import Endpoints, Endpoint
+from ..api import Endpoints
+from ..capacity import _wrap_capacity_command_callback as capacity_cmd_cb
+from ..client_pool.asynchronous import AsyncClientPool
 from ..market_hours.xpath import XPaths
 from ..option_chain import (
     OptionsChainParams,
     OptionsChainResponseDataValidator,
 )
-from ..producer.services.kafka import KafkaService, KafkaHandler
-from ..requestlib.ctx import TASK_VAR
-from ..requestlib.instrument import LoggingInstrument
+from ..producer.services.kafka.utils import extract_producer_configs
+from ..requestlib.adapters import BodyTooBigRequest, OptionsChainRequest
+
+# from ..requestlib.ctx import TASK_VAR
+from ..requestlib.ctx import get_and_set_async_request_task_var
+from ..requestlib.instrument import LoggingInstrument, register_instrument
 from ..requestlib.make import MakeRequestModel
 from ..requestlib.task import AsyncRequestTaskModel
-from .base_producer import BaseKafkaProducer
+from .base_producer import BaseProducer, KAFKA_CONFIG
 
 if TYPE_CHECKING:
-    from kafka import KafkaProducer
     from ..producer.client.asynchronous import AsyncSchwabProducer
-    from kafka.consumer.fetcher import ConsumerRecord
 
-# Logging setup
 LOG_LEVEL = "DEBUG"
 logger = get_logger(__name__, LOG_LEVEL, ch=True, ch_level="INFO")
+TASK_VAR = get_and_set_async_request_task_var()
 
 
-class CapacityCommand(TypedDict, total=True):
-    action: Literal["reserve", "unreserve"]
-    capacity: int
-    pid: Optional[int]
-    confirm_topic: str
-    client_idx: int
-
-
-def new_capacity_command(**params: Unpack[CapacityCommand]):
-    if params["pid"] is None:
-        params["pid"] = os.getpid()
-    assert params["action"] in ("reserve", "unreserve")
-    assert params["capacity"] > 0
-    assert params["confirm_topic"]
-    assert params["client_idx"]
-    return params
-
-
-def validate_capacity_command(command: dict) -> CapacityCommand:
-    assert command["action"] in ("reserve", "unreserve")
-    assert command["capacity"] > 0
-    assert command["confirm_topic"]
-    assert command["client_idx"]
-    return cast(CapacityCommand, command)
-
-
-async def capacity_command_callback(
-    message: "ConsumerRecord", runner: "OptionsChainProducer"
-):
-    if isinstance(message.value, bytes):
-        command = json.loads(message.value.decode())
-    elif isinstance(message.value, str):
-        command = json.loads(message.value)
-    elif isinstance(message.value, dict):
-        command = message.value
-    else:
-        raise TypeError(f"Message value of unexpected type {message.value}")
-    command = validate_capacity_command(command)
-    client_idx = command["client_idx"]
-    client = runner.clients.get_client_by_idx(client_idx)
-
-    current_reserved_capacity = await client.reserved
-
-    if command["action"] == "reserve":
-        capacity_to_reserve = command["capacity"]
-        updated_reserved_capacity = current_reserved_capacity + capacity_to_reserve
-
-    else:
-        capacity_to_unreserve = command["capacity"]
-        updated_reserved_capacity = current_reserved_capacity - capacity_to_unreserve
-
-    async with client.get_redis() as conn:
-        await conn.set(client.redis_keys.reserved, updated_reserved_capacity)
-
-    return command
-
-
-def _wrap_capacity_command_callback(runner: "OptionsChainProducer"):
-
-    callback = capacity_command_callback
-
-    async def wrapper(message: "ConsumerRecord"):
-        command = await callback(message, runner)
-
-        if command["action"] == "reserve":
-            confirm_msg = "Confirming capacity reservation of {}"
-        else:
-            confirm_msg = "Confirming release of capacity reservation of {}"
-
-        topic = command["confirm_topic"]
-        capacity = command["capacity"]
-        confirm_msg = confirm_msg.format(capacity).encode()
-        runner._kafka_service.publish(topic, confirm_msg).flush()
-
-    return wrapper
-
-
-class OptionsChainRequest(MakeRequestModel):
-
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-
-    symbol: str = Field()
-    endpoint: Union[str, Endpoint] = Endpoints.OptionsChain
-
-    def model_post_init(self, __context: Any = None):
-        self.params: Dict = OptionsChainParams(
-            symbol=self.symbol,
-            strategy=OptionsChainParams.Strategy.ANALYTICAL,
-            include_quotes=True,
-        ).query_parameters
-
-
-OptionsChainRequest = MakeRequestModel.register(OptionsChainRequest)
-
-
-class BodyTooBigRequest(MakeRequestModel):
-    """
-    This class represents a collection of requests related to particular
-    symbols whose options chains are so large Schwab's server complains
-    they're too big to send in oneshot.  We instead break up the request
-    by `expMonth` (and, for some, `contractType`)
-
-    2024-10-13 21:11:28,809 ERROR daily.utils.logging Request error {"fault":{"faultstring":"Body buffer overflow","detail":{"errorcode":"protocol.http.TooBigBody"}},"params":{"symbol": "$NDX", "contractType": "ALL", "includeUnderlyingQuote": "True", "strategy": "ANALYTICAL", "range": "ALL", "expMonth": "ALL", "optionType": "ALL"},"endpoint":"/marketdata/v1/chains"}
-    """
-
-    symbol: str = Field()
-    endpoint: Union[str, Endpoint] = Endpoints.OptionsChain
-    list_params: List[Dict] = Field(default_factory=list)
-    list_tasks: List["MakeRequestModel"] = Field(default_factory=list)
-
-    def model_post_init(self, __context: Any = None):
-        self.list_params = []
-        self.list_tasks = []
-        if self.symbol == "$NDX":
-            self.list_params.extend(
-                [
-                    OptionsChainParams(
-                        symbol=self.symbol,
-                        strategy=OptionsChainParams.Strategy.ANALYTICAL,
-                        include_quotes=True,
-                        exp_month=month.value,
-                        contract_type="CALL",
-                    ).query_parameters
-                    for month in OptionsChainParams.Months
-                ]
-            )
-            self.list_params.extend(
-                [
-                    OptionsChainParams(
-                        symbol=self.symbol,
-                        strategy=OptionsChainParams.Strategy.ANALYTICAL,
-                        include_quotes=True,
-                        exp_month=month.value,
-                        contract_type="PUT",
-                    ).query_parameters
-                    for month in OptionsChainParams.Months
-                ]
-            )
-        else:
-            self.list_params.extend(
-                [
-                    OptionsChainParams(
-                        symbol=self.symbol,
-                        strategy=OptionsChainParams.Strategy.ANALYTICAL,
-                        include_quotes=True,
-                        exp_month=month.value,
-                    ).query_parameters
-                    for month in OptionsChainParams.Months
-                ]
-            )
-        self.list_tasks.extend(
-            [
-                MakeRequestModel(
-                    endpoint=self.endpoint,
-                    params=p,
-                    incl_fetch_time=self.incl_fetch_time,
-                    capture_output=self.capture_output,
-                    incl_response=self.incl_response,
-                    send_protocol_dict=self.send_protocol_dict,
-                )
-                for p in self.list_params
-            ]
-        )
-
-
-BodyTooBigRequest = MakeRequestModel.register(BodyTooBigRequest)
-
-
-class OptionsChainProducer(BaseKafkaProducer):
+class OptionsChainProducer(BaseProducer):
     OptionsChainParams = OptionsChainParams
     OptionsChainRequestFactory: ClassVar[Callable[..., MakeRequestModel]] = (
         OptionsChainRequest
@@ -241,6 +68,7 @@ class OptionsChainProducer(BaseKafkaProducer):
         fh_type="RotatingFileHandler",
         fh_type_kwargs={"maxBytes": 1_048_576, "backupCount": 500},  # 1MB
     )
+    DEFAULT_KAFKA_TOPIC_PREFIX: str = "option_chain_topic"
 
     class MarketHoursConfig:
         MARKET = XPaths.option.name
@@ -261,17 +89,15 @@ class OptionsChainProducer(BaseKafkaProducer):
             def __init__(self):
                 self._registered_exception_handlers: DefaultDict[
                     Union[Exception, BaseException],
-                    Callable[
-                        [asyncio.AbstractEventLoop, Context | Dict], Optional[Any]
-                    ],
+                    Callable[[asyncio.AbstractEventLoop, Dict], Optional[Any]],
                 ] = defaultdict(lambda: self.handle_task_exception)
 
-            def handle_task_exception(self, loop: asyncio.AbstractEventLoop, context):
-                # Extract details of the exception from context
+            def handle_task_exception(
+                self, loop: asyncio.AbstractEventLoop, context: Dict
+            ):
                 exception = context.get("exception")
                 message = context.get("message", "")
 
-                # Get more context details like task details or where it occurred
                 task = context.get("task")
                 if task:
                     task_name = task.get_name()
@@ -287,7 +113,6 @@ class OptionsChainProducer(BaseKafkaProducer):
                 else:
                     logger.error(f"Caught error message in {task_name}: {message=}")
 
-                # Log full context for better debugging
                 logger.error(f"Full context: {context=}")
 
         class GracefulShutdownHandler(ClassNameLoggerMixin):
@@ -310,7 +135,6 @@ class OptionsChainProducer(BaseKafkaProducer):
                     if task is not asyncio.current_task(loop)
                 ]
 
-                # Log pending tasks
                 type(self).get_logger().info(
                     f"Cancelling {len(tasks)} outstanding tasks... ({loop!r})"
                 )
@@ -347,6 +171,7 @@ class OptionsChainProducer(BaseKafkaProducer):
         regstart: Optional[dt.datetime] = None,
         regend: Optional[dt.datetime] = None,
         queue_capacity: int = 500,
+        kafka_topic_prefix: Optional[str] = None,
         kafka_topic_date: Optional[dt.date] = None,
         kafka_config: Optional[Dict] = None,
         fundamentals_loader: Optional["FundamentalsLoader"] = None,
@@ -359,8 +184,8 @@ class OptionsChainProducer(BaseKafkaProducer):
             sink=sink,
             regstart=regstart,
             regend=regend,
-            topic_date=kafka_topic_date,
-            kafka_config=kafka_config,
+            # topic_date=kafka_topic_date,
+            # kafka_config=kafka_config,
         )
         self._loop_exception_handler = (
             type(self).LoopConfig.ExceptionHandler().handle_task_exception
@@ -368,57 +193,45 @@ class OptionsChainProducer(BaseKafkaProducer):
         self._graceful_shutdown_handler = (
             type(self).LoopConfig.GracefulShutdownHandler().graceful_shutdown
         )
-        # self.request_params = chain_req_params.query_parameters
         self.validator = OptionsChainResponseDataValidator()
         self.set_queue_capacity(queue_capacity)
 
         if fundamentals_loader is not None:
             self.fundamentals = fundamentals_loader
         else:
+            if TYPE_CHECKING:
+                assert isinstance(self.clients, AsyncClientPool)
             self.fundamentals = FundamentalsLoader(self._symbols, self.clients)
 
         self._set_hours()
+        self._topic_prefix = kafka_topic_prefix or self.DEFAULT_KAFKA_TOPIC_PREFIX
+        self._topic_date = kafka_topic_date or dt.date.today()
+        self._kafka_topic = (
+            f"{self._topic_prefix}_{self._topic_date.strftime('%Y%m%d')}"
+        )
         logger.info(f"regstart: {self.regstart.isoformat(' ', 'minutes')}")
         logger.info(f"regend: {self.regend.isoformat(' ', 'minutes')}")
         logger.info(f"queue capacity: {self.queue_capacity}")
         logger.info("Initialized")
 
-    def _start_kafka_service(self):
-        self._kafka_service = KafkaService()
-        topics = [f"async-schwab-producer-{idx}" for idx in self.clients.get_idxs()]
-        consumer = self._kafka_service.initialize_consumer(*topics)
-        self._kafka_service.initialize_producer()
-        handler = KafkaHandler(
-            *topics, callbacks=[_wrap_capacity_command_callback(self)]
+    def set_up_kafka_service(self):
+
+        sink_producer_configs = extract_producer_configs(KAFKA_CONFIG)
+        self.sink_producer = self._kafka_service.initialize_producer(
+            **sink_producer_configs
         )
-        self._kafka_service.add_handler(handler)
-        self._kafka_service.listen(consumer)
 
-    def log_performance_metrics(self):
-        mem = psutil.virtual_memory()
-        cpu = psutil.cpu_percent(interval=1)
-        self.get_logger().info(f"Memory Usage: {mem.percent}% | CPU Usage: {cpu}%")
+        self._kafka_service.new_topic(self._kafka_topic, num_partitions=16)
 
-    def set_queue_capacity(self, n: int):
-        assert n > 0
-        self._queue_capacity = n
-        for client in self.clients:
-            client.set_queue_capacity(self.queue_capacity)
-        return self
-
-    @property
-    def queue_capacity(self):
-        return self._queue_capacity
+        topics = [f"async-schwab-producer-{idx}" for idx in self.clients.get_idxs()]
+        self._kafka_capacity_service = self._kafka_service.initialize_scoped_service(
+            *topics, handler_callbacks=[capacity_cmd_cb(self)]
+        )
+        self._kafka_capacity_service.start(timeout_ms=30_000, to_thread=True)
 
     async def cleanup(self):
         await self.fundamentals._clear_cache()
-        if not self._kafka_service._stop_event.is_set():
-            self._kafka_service._stop_event.set()
-        if (
-            self._kafka_service._is_multiprocess
-            and not self._kafka_service.mpevent.is_set()
-        ):
-            self._kafka_service.mpevent.set()
+        self._kafka_service.stop()
         await super().cleanup()
 
     async def add_symbol(self, symbol: str) -> None:
@@ -431,9 +244,6 @@ class OptionsChainProducer(BaseKafkaProducer):
 
     def _handle_make_request_exception(self):
         task = TASK_VAR.get()
-        self.get_logger().error(
-            f"Request error {task.summary_json.error}", exc_info=True, stacklevel=2  # type: ignore
-        )
         if task.summary_json.response is not None:
             if task.summary_json.response.reason.lower() == "bad request":  # type: ignore
                 symbol = task.make_request.params["symbol"]  # type: ignore
@@ -455,25 +265,52 @@ class OptionsChainProducer(BaseKafkaProducer):
                     del data["response"]
                 if self._sink:
                     asyncio.get_running_loop().call_soon_threadsafe(
-                        self._to_kafka, symbol, data
+                        self._kafka_sink, symbol, data
                     )
+                    task.sink()
         else:
             self._handle_make_request_exception()
 
         task.complete()
+
+    def _kafka_sink(self, symbol: str, data: Dict, flush: bool = False):
+        def _on_send_success(record_metadata):
+            self.get_logger().debug(
+                f"Sent {symbol} message to {record_metadata.topic} partition {record_metadata.partition} offset {record_metadata.offset}"
+            )
+
+        def _on_send_error(excp):
+            self.get_logger().error(f'Failed to send message {symbol}', exc_info=excp)
+
+        try:
+            self._kafka_service.publish(
+                self._kafka_topic,
+                producer=self.sink_producer,
+                key=symbol.encode(),
+                value=data,
+                callbacks=[_on_send_success],
+                errbacks=[_on_send_error],
+                flush=flush,
+            )
+
+        except KafkaError as e:
+            self.get_logger().error(f"Failed to send data to Kafka for {symbol}: {e}")
 
     async def _stage_requests_loop(self, start_event: asyncio.Event):
         symbols = iter(self.symbols)
         self._round_trip = 1
         self.get_logger().info(f"Starting round trip {self._round_trip}")
         loop_count = 0
-        count = itertools.count().__next__
+        loop_counter = itertools.count().__next__
         filled = [False for _ in self.clients]
+        _cut = []
+
         while True:
             c = self.clients.next_client()
-            loop_count += count()
-            if (queue_capacity := await c.get_available_queue_capacity()) > 0:
-                for _ in range(queue_capacity):
+            loop_count += loop_counter()
+            if (queue_capacity := await c.get_available_queue_capacity()) > 0:  # type: ignore
+                initial_queue_capacity = queue_capacity
+                while queue_capacity:
                     if self.graceful_exit_event.is_set():
                         raise InterruptedError("Graceful exit event set")
                     elif self.past_regend:
@@ -482,7 +319,11 @@ class OptionsChainProducer(BaseKafkaProducer):
                         return
                     else:
                         try:
-                            symbol = next(symbols)
+                            if _cut:
+                                make_req = _cut.pop(0)
+                                symbol = None
+                            else:
+                                symbol = next(symbols)
                         except StopIteration:
                             self._round_trip += 1
                             self.get_logger().info(
@@ -492,19 +333,20 @@ class OptionsChainProducer(BaseKafkaProducer):
                             symbol = next(symbols)
                         finally:
 
-                            if symbol in body_too_big:
+                            if symbol is None:
+                                assert make_req
+                                task = await self.clients.enqueue_make_request(
+                                    make_req, client=c
+                                )
+
+                            elif symbol in body_too_big:
                                 make_reqs = BodyTooBigRequest(
                                     symbol=symbol, incl_fetch_time=True
                                 ).list_tasks
-                                for make_req in iter(make_reqs):
-                                    task = await self.clients.enqueue_make_request(
-                                        make_req, client=c
-                                    )
-                                    # assert task.make_request.params is not None
-                                    # self.get_logger().debug(
-                                    #     f"Task created {task.uuid} for {symbol} expMont={task.make_request.params['expMonth']} with client {task.client_idx}"
-                                    # )
-
+                                _cut.extend(make_reqs[1:])
+                                task = await self.clients.enqueue_make_request(
+                                    make_reqs[0], client=c
+                                )
                             else:
                                 task = await self.clients.enqueue_make_request(  # noqa: F841
                                     type(self).OptionsChainRequestFactory(
@@ -513,12 +355,10 @@ class OptionsChainProducer(BaseKafkaProducer):
                                     ),
                                     client=c,
                                 )
-                                # self.get_logger().debug(
-                                #     f"Task created {task.uuid} for {symbol} with client {task.client_idx}"  # type: ignore
-                                # )
                             self._total_requests += 1
+                            queue_capacity -= 1
 
-                c.get_logger_adapter().info(f"Staged {queue_capacity} tasks")
+                c.get_logger_adapter().info(f"Staged {initial_queue_capacity} tasks")
 
             elif filled is not None:
                 filled[self.clients.index(c)] = True
@@ -555,13 +395,12 @@ class OptionsChainProducer(BaseKafkaProducer):
 
             await start_event.wait()
             self.get_logger().info("Queues have been pre-filled, starting the clients")
+            del start_event
 
             self.clients.start(
                 callback=self._handle_completed_task,
                 endpoint=Endpoints.OptionsChain,
             )
-
-            self._start_kafka_service()
 
             await self.end_event.wait()
 
@@ -592,7 +431,7 @@ def parse_hours(date_string):
             raise ee from e
 
 
-def parse_args():
+def _arg_parser():
     parser = argparse.ArgumentParser()
     aa = parser.add_argument
     aa("--test", dest="test", action="store_true", default=False)
@@ -637,20 +476,29 @@ def parse_args():
         help="enable asyncio debugging",
     )
 
-    return parser.parse_args()
+    return parser
+
+
+def usage():
+    _arg_parser().print_usage()
+
+
+def parse_args():
+    return _arg_parser().parse_args()
 
 
 async def main(loop):
 
-    from ..client.functions import get_all_clients_async
+    from ..client.functions import get_all_clients
     from ..producer.client.asynchronous import AsyncSchwabProducer
 
-    clients = await get_all_clients_async(
+    clients = get_all_clients(
         client_factory=AsyncSchwabProducer,
         login=True,
     )
 
     AsyncRequestTaskModel.attach_instrument(LoggingInstrument())
+    # register_instrument(LoggingInstrument())
 
     global RUNNER
     RUNNER = OptionsChainProducer(
