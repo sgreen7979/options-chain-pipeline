@@ -58,8 +58,8 @@ if TYPE_CHECKING:
     from kafka.consumer.subscription_state import ConsumerRebalanceListener
 
 __all__ = [
-    "KafkaHandler","ScopedService", "KafkaService",
-    "KafkaConfigManager","API_VERSION", "KAFKA_MESSAGE_VAR",
+    "KafkaHandler", "ScopedService", "KafkaService",
+    "KafkaConfigManager", "API_VERSION", "KAFKA_MESSAGE_VAR",
 ]
 
 _P = ParamSpec("_P")
