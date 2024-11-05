@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from abc import abstractmethod
 import asyncio
 import asyncio.base_futures
 import asyncio.futures
@@ -11,33 +12,52 @@ import json
 import sys
 import threading
 from typing import (
+    TYPE_CHECKING,
     Any,
     Callable,
     ClassVar,
     Dict,
+    Generic,
     List,
     Optional,
     Tuple,
-    TYPE_CHECKING,
+    TypeVar,
     Union,
+    overload,
 )
 
 from kafka import KafkaAdminClient, KafkaProducer
 from kafka.admin import NewTopic
 from kafka.errors import KafkaError
+import psutil
 
 from daily.market_hrs import functions as mh
 from daily.utils.logging import ClassNameLoggerMixin
 from daily.utils.requests_dataclasses import RequestOutcome, RequestStatistics
 
-from ..client_pool.asynchronous import AsyncClientPool
+from ..client_pool.base import ClientPool
+
+# from ..client_pool.synchronous import SyncClientPool
+# from ..client_pool.asynchronous import AsyncClientPool
 from ..market_hours import XPaths, MarketsType, MarketType
+from ..producer.services.kafka import KafkaService, KafkaHandler
 from ..producer.services.kafka.utils import get_broker_api_version
+from ..capacity import _wrap_capacity_command_callback as capcity_cmd_cb
 
 if TYPE_CHECKING:
-    import logging
     import requests
     from ..producer.client.asynchronous import AsyncSchwabProducer
+    from ..producer.client.synchronous import SyncSchwabProducer
+    from ..client_pool.asynchronous import AsyncClientPool
+    from ..client_pool.synchronous import SyncClientPool
+
+# _ProducerType = TypeVar("_ProducerType", "AsyncSchwabProducer", "SyncSchwabProducer")
+_ProducerType = TypeVar("_ProducerType")
+_ProducerPoolType = TypeVar(
+    # "_ProducerPoolType", bound=Union["SyncClientPool", "AsyncClientPool"]
+    "_ProducerPoolType",
+    bound=ClientPool,
+)
 
 
 # Configuration
@@ -84,13 +104,18 @@ class BaseProducer(ClassNameLoggerMixin):
         symbols: Union[List[str], Callable[[], List[str]]],
         *,
         clients: Optional[List["AsyncSchwabProducer"]] = None,
+        # clients: Optional[
+        #     List["AsyncSchwabProducer"] | List["SyncSchwabProducer"]
+        # ] = None,
         test: bool = False,
         test_time_minutes: float = 20.0,
         sink: bool = True,
         regstart: Optional[dt.datetime] = None,
         regend: Optional[dt.datetime] = None,
-    ):
-        self.clients = AsyncClientPool(clients=clients)
+    ) -> None:
+        from ..client_pool.asynchronous import AsyncClientPool
+
+        self.clients = AsyncClientPool(clients=clients).set_runner(self)
         self._symbols: List[str] = (
             symbols() if isinstance(symbols, Callable) else symbols
         )
@@ -113,6 +138,8 @@ class BaseProducer(ClassNameLoggerMixin):
         self._total_requests = 0
         self.end_event = asyncio.Event()
 
+        self._get_kafka_service()
+
         self.get_logger().info(f"Number of clients {len(self.clients)}")
         self.get_logger().info(
             f"Total rolling request capacity {self.clients._rolling_capacity()}"
@@ -121,6 +148,46 @@ class BaseProducer(ClassNameLoggerMixin):
         self.get_logger().info(
             f"Estimated round trip time {self.round_trip_time} minutes"
         )
+
+    # @overload
+    # def _create_client_pool(
+    #     self, clients: Optional[List["AsyncSchwabProducer"]]
+    # ) -> "AsyncClientPool": ...
+
+    # @overload
+    # def _create_client_pool(
+    #     self, clients: Optional[List["SyncSchwabProducer"]]
+    # ) -> "SyncClientPool": ...
+
+    # @abstractmethod
+    # def _create_client_pool(
+    #     self,
+    #     clients: Optional[
+    #         Union[List["SyncSchwabProducer"], List["AsyncSchwabProducer"]]
+    #     ],
+    # ) -> Union["SyncClientPool", "AsyncClientPool"]: ...
+
+    def _get_kafka_service(self):
+        self._kafka_service = KafkaService()
+        self.set_up_kafka_service()
+
+    def set_up_kafka_service(self, *args, **kwargs):
+        """
+        Override this function to specify components
+        of the kafka service you would like to include
+        """
+        pass
+
+    def set_queue_capacity(self, n: int):
+        assert n > 0
+        self._queue_capacity = n
+        for client in self.clients:
+            client.set_queue_capacity(self.queue_capacity)
+        return self
+
+    @property
+    def queue_capacity(self):
+        return self._queue_capacity
 
     @property
     def running(self) -> bool:
@@ -139,8 +206,6 @@ class BaseProducer(ClassNameLoggerMixin):
     @property
     def symbols(self) -> List[str]:
         return self._symbols
-
-    # def get_logger(self) -> "logging.Logger": ...
 
     def _set_hours(self):
         self.regstart, self.regend = self._get_hours()
@@ -209,28 +274,6 @@ class BaseProducer(ClassNameLoggerMixin):
         self.get_logger().info("Clearing symbols")
         self._symbols = []
 
-    def _extract_and_add_request_outcome(
-        self,
-        fetch_time: "dt.datetime",
-        symbol: str,
-        client_idx: int,
-        response: Optional["requests.Response"] = None,
-        prepared_request: Optional["requests.PreparedRequest"] = None,
-        data_validator: Optional[Callable[[Dict], bool]] = None,
-        metadata: Optional[Dict] = None,
-    ) -> "RequestOutcome":
-        ro = RequestOutcome(
-            fetch_time,
-            symbol,
-            client_idx,
-            response,
-            prepared_request,
-            data_validator,
-            metadata,
-        )
-        self._request_statistics.add_request_outcome(ro)
-        return ro
-
     async def cleanup(self):
         for client in self.clients:
             client.stop()
@@ -256,13 +299,6 @@ class BaseProducer(ClassNameLoggerMixin):
             * self.clients._rolling_capacity()
         )
 
-    # def _ensure_running_loop(self):
-    #     if self.loop.is_closed():
-    #         self.loop = asyncio.new_event_loop()
-    #         asyncio.set_event_loop(self.loop)
-    #         for client in self.clients:
-    #             client.set_loop(self.loop)
-
     async def _wait_until_regstart(self):
         self._ran = True
 
@@ -271,7 +307,6 @@ class BaseProducer(ClassNameLoggerMixin):
 
         self._running = True
         self.get_logger().info("Running")
-        # self.loop = asyncio.get_event_loop()
         return self
 
     def _begin_trip(self) -> float:
@@ -332,109 +367,7 @@ class BaseProducer(ClassNameLoggerMixin):
         self.get_logger().info("Returning")
         return
 
-class BaseKafkaProducer(BaseProducer):
-    def __init__(
-        self,
-        symbols: Union[List[str], Callable[[], List[str]]],
-        topic_date: Optional[dt.date] = None,
-        kafka_config: Optional[Dict] = None,
-        *,
-        clients: Optional[List["AsyncSchwabProducer"]] = None,
-        test: bool = False,
-        test_time_minutes: float = 20.0,
-        sink: bool = True,
-        regstart: Optional[dt.datetime] = None,
-        regend: Optional[dt.datetime] = None,
-    ):
-        super().__init__(
-            symbols,
-            clients=clients,
-            test=test,
-            test_time_minutes=test_time_minutes,
-            sink=sink,
-            regstart=regstart,
-            regend=regend,
-        )
-        self._kafka_config = kafka_config or deepcopy(KAFKA_CONFIG)
-        self._topic_prefix = self._kafka_config["topic_prefix"]
-        self._topic_date = topic_date or dt.date.today()
-        self._bootstrap_servers = self._kafka_config.get(
-            "bootstrap_servers", "localhost:9092"
-        )
-        self._compression_type = self._kafka_config.get("compression_type", None)
-        self._value_serializer = self._kafka_config.get("value_serializer", None)
-        self._max_request_size = self._kafka_config.get("max_request_size", 1048576)
-        self._request_timeout_ms = self._kafka_config.get("request_timeout_ms", 30000)
-        self._max_block_ms = self._kafka_config.get("max_block_ms", 60000)
-        self._retries = self._kafka_config.get("retries", 0)
-        if self._sink:
-            self.kafka_topic = self._create_kafka_topic(
-                self._kafka_config.get("num_partitions", 1),
-                self._kafka_config.get("replication_factor", 1),
-            )
-        else:
-            self.kafka_topic = (
-                f"option_chain_topic_{self._topic_date.strftime('%Y%m%d')}"
-            )
-        self.producer = KafkaProducer(
-            bootstrap_servers=self._bootstrap_servers,
-            value_serializer=self._value_serializer
-            or (lambda v: json.dumps(v).encode()),
-            compression_type=self._compression_type,
-            max_request_size=self._max_request_size,
-            request_timeout_ms=self._request_timeout_ms,
-            max_block_ms=self._max_block_ms,
-            retries=self._retries,
-            api_version=API_VERSION,
-        )
-        atexit.register(self.producer.close)
-        self.get_logger().info(f"kafka topic: {self.kafka_topic}")
-
-    def _create_kafka_topic(
-        self,
-        num_partitions: int = 1,
-        replication_factor: int = 1,
-    ) -> str:
-        topic_name = f"{self._topic_prefix}_{self._topic_date.strftime('%Y%m%d')}"
-        admin_client = KafkaAdminClient(
-            bootstrap_servers=self._bootstrap_servers,
-            api_version=API_VERSION,
-        )
-        if topic_name not in admin_client.list_topics():
-            topic = NewTopic(topic_name, num_partitions, replication_factor)
-            admin_client.create_topics([topic])
-            self.get_logger().info(f"Created kafka topic '{topic_name}'")
-
-        admin_client.close()
-        return topic_name
-
-    def _to_kafka(self, symbol: str, data: Dict, flush: bool = False):
-        def _on_send_success(record_metadata):
-            self.get_logger().debug(
-                f"Sent {symbol} message to {record_metadata.topic} partition {record_metadata.partition} offset {record_metadata.offset}"
-            )
-
-        def _on_send_error(excp):
-            self.get_logger().error(f'Failed to send message {symbol}', exc_info=excp)
-
-        try:
-            self.producer.send(
-                self.kafka_topic,
-                key=symbol.encode(),
-                value=data,
-            ).add_callback(_on_send_success).add_errback(_on_send_error)
-
-            if flush:
-                self.get_logger().debug("Flushing kafka producer")
-                self.producer.flush()
-
-        except KafkaError as e:
-            self.get_logger().error(f"Failed to send data to Kafka for {symbol}: {e}")
-
-    def get_kafka_producer_config(self):
-        return self.producer.config
-
-    async def cleanup(self):
-        self.producer.flush()
-        atexit.register(self.producer.close)
-        await super().cleanup()
+    def log_performance_metrics(self):
+        mem = psutil.virtual_memory()
+        cpu = psutil.cpu_percent(interval=1)
+        self.get_logger().info(f"Memory Usage: {mem.percent}% | CPU Usage: {cpu}%")
