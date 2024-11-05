@@ -671,11 +671,10 @@ class IncrementalSubscriptionHandler:
     def unsubscribe(self, consumer: KafkaConsumer, *topics: str):
         if (
             listener_process := self._service._consumer_listener_process_map[consumer]
-        ) is not None:
-            if listener_process.is_alive():
-                self._service.control_queue.put(
-                    {"action": "unsubscribe", "topics": set(topics)}
-                )
+        ) is not None and listener_process.is_alive():
+            self._service.control_queue.put(
+                ControlCommand(action="unsubscribe", topics=set(topics))
+            )
         else:
             subs = self._get_current_subscriptions(consumer)
             subs -= set(topics)
