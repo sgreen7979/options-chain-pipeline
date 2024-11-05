@@ -3,8 +3,11 @@ import asyncio
 import contextvars
 import datetime as dt
 import functools
+from json import dumps as json_dumps, loads as json_loads
+import os
 from typing import (
     TYPE_CHECKING,
+    Any,
     Callable,
     ClassVar,
     Generic,
@@ -21,14 +24,18 @@ from typing import (
 import weakref
 
 import aiohttp
-from pydantic import BaseModel, Field, field_serializer
+from pydantic import BaseModel, Field, field_serializer, PrivateAttr, computed_field
+from kafka import KafkaProducer, KafkaConsumer
 
 from daily.utils.logging import get_logger, ClassNameLoggerMixin
 
+from ..api import Endpoint
+from ..capacity import CapacityCommand
+from ..producer.services.kafka import KafkaService
+
+from .instrument import Instrument, register_instrument, get_registered_instruments
 from .make import MakeRequestModel
 from .priority import Priority
-from ..api import Endpoint
-from .instrument import Instrument
 from .summary import _SummaryModel
 from .types import _R
 
@@ -64,33 +71,38 @@ class BaseRequestTaskModel(BaseModel, ClassNameLoggerMixin, Generic[_R]):
     during market hours
     """
 
-    _instruments: ClassVar[Set[Instrument]] = set()
+    _instruments: ClassVar[Set[Instrument]] = set[Instrument]()
 
     @classmethod
     def attach_instrument(cls, instrument: Instrument):
         cls._instruments.add(instrument)
 
+    # @staticmethod
+    # def attach_instrument(instrument_type: Type[Instrument], *args, **kwargs):
+    #     register_instrument(instrument_type, *args, **kwargs)
+
+    # @staticmethod
+    # def register_instrument(instrument: "Instrument") -> None:
+    #     register_instrument(instrument)
+
     def __init__(self, **kwargs) -> None:
-        if kwargs.get("summary_json", None) is None:
-            make_request = kwargs["make_request"]
-            summary_json = _SummaryModel[_R](
-                uuid=make_request.uuid,
-                capture_output=make_request.capture_output,
-                params=make_request.params,
-                endpoint=make_request.endpoint,
-            )
-            kwargs["summary_json"] = summary_json
+        # if kwargs.get("summary_json", None) is None:
+        # make_request = kwargs["make_request"]
+        # summary_json = _SummaryModel[_R](
+        #     uuid=make_request.uuid,
+        #     capture_output=make_request.capture_output,
+        #     params=make_request.params,
+        #     endpoint=make_request.endpoint,
+        # )
+        # kwargs["summary_json"] = summary_json
         super().__init__(**kwargs)
         self._cancelled: bool = False
         self.summary_json.time_created = self.time_created
         model_registry[self.uuid] = self
+        # self._fire_instruments("CREATION")
         if type(self)._instruments:
             for instrument in type(self)._instruments:
                 instrument.on_task_create(self)
-        # weakref.finalize(self, lambda self: del self)
-
-    # def model_post_init(self, __context: Any = None):
-    #     self.summary_json: _SummaryModel[_R] = self.get_summary_json()
 
     class Config:
         arbitrary_types_allowed = True
@@ -101,12 +113,25 @@ class BaseRequestTaskModel(BaseModel, ClassNameLoggerMixin, Generic[_R]):
     time_staged: Optional[str] = Field(default=None)
     time_scheduled: Optional[str] = Field(default=None)
     time_executed: Optional[str] = Field(default=None)
-    summary_json: _SummaryModel[_R]
+    # summary_json: _SummaryModel[_R]
     context_set_time: Optional[str] = Field(default=None)
+    _summary_cache: _SummaryModel[_R] = PrivateAttr(None)
 
     @property
     def uuid(self) -> str:
         return self.make_request.uuid
+
+    @computed_field
+    @property
+    def summary_json(self) -> _SummaryModel[_R]:
+        if self._summary_cache is None:
+            self._summary_cache = _SummaryModel(
+                uuid=self.make_request.uuid,
+                capture_output=self.make_request.capture_output,
+                params=self.make_request.params,
+                endpoint=self.make_request.endpoint,
+            )
+        return self._summary_cache
 
     @staticmethod
     def _decode_time(t: Union[float, dt.datetime, str]) -> str:
@@ -123,9 +148,11 @@ class BaseRequestTaskModel(BaseModel, ClassNameLoggerMixin, Generic[_R]):
 
     def set_time_staged(self, t: Union[float, dt.datetime, str]):
         self.time_staged = self._decode_time(t)
+        # self._fire_instruments("STAGED")  # NOTE this wasn't here before
 
     def set_time_scheduled(self, t: Union[float, dt.datetime, str]):
         self.time_scheduled = self._decode_time(t)
+        # self._fire_instruments("SCHEDULED")
         if type(self)._instruments:
             for instrument in type(self)._instruments:
                 instrument.on_task_scheduled(self)
@@ -134,6 +161,7 @@ class BaseRequestTaskModel(BaseModel, ClassNameLoggerMixin, Generic[_R]):
         self.time_executed = self._decode_time(t)
         if self.summary_json.fetchTime is None:
             self.summary_json.fetchTime = self.time_executed
+        # self._fire_instruments("EXECUTED")
         if type(self)._instruments:
             for instrument in type(self)._instruments:
                 instrument.on_task_executed(self)
@@ -151,14 +179,10 @@ class BaseRequestTaskModel(BaseModel, ClassNameLoggerMixin, Generic[_R]):
 
     def set_error(self, err: Union[Exception, BaseException]):
         self.summary_json.set_error(err)
+        # self._fire_instruments("ERROR")
         if type(self)._instruments:
             for instrument in type(self)._instruments:
                 instrument.on_set_error(self)
-
-    # @computed_field
-    # @property
-    # def time_executed(self) -> Optional[str]:
-    #     return self.summary_json.fetchTime
 
     @property
     def params(self) -> Optional[dict]:
@@ -169,7 +193,7 @@ class BaseRequestTaskModel(BaseModel, ClassNameLoggerMixin, Generic[_R]):
 
     def get_context(
         self,
-        task_var: contextvars.ContextVar["BaseRequestTaskModel"],
+        task_var: contextvars.ContextVar["BaseRequestTaskModel[_R]"],
     ) -> contextvars.Context:
         """
         Set the given task var and return the current context
@@ -238,17 +262,6 @@ class BaseRequestTaskModel(BaseModel, ClassNameLoggerMixin, Generic[_R]):
         self.summary_json.client_idx = client_idx
         return self
 
-    # def get_summary_json(self) -> _SummaryModel[_R]:
-    #     return _SummaryModel[_R](
-    #         uuid=self.uuid,
-    #         capture_output=self.capture_output,
-    #         client_idx=self.client_idx,
-    #         params=self.make_request.params,
-    #         time_created=self.time_created,
-    #         endpoint=self.make_request.endpoint,
-    #         time_staged=self.time_staged,
-    #     )
-
     @property
     def url(self) -> str:
         if isinstance(self.make_request.endpoint, Endpoint):
@@ -259,9 +272,11 @@ class BaseRequestTaskModel(BaseModel, ClassNameLoggerMixin, Generic[_R]):
     def complete(self):
         if not self.done():
             self.get_logger().error("Cannot call complete on an incomplete task")
-        elif type(self)._instruments:
-            for instrument in type(self)._instruments:
-                instrument.on_task_completion(self)
+        else:
+            # self._fire_instruments("COMPLETE")
+            if type(self)._instruments:
+                for instrument in type(self)._instruments:
+                    instrument.on_task_completion(self)
 
     def cancel(self):
         if not self.done() and not self._cancelled:
@@ -272,6 +287,35 @@ class BaseRequestTaskModel(BaseModel, ClassNameLoggerMixin, Generic[_R]):
             if type(self)._instruments:
                 for instrument in type(self)._instruments:
                     instrument.on_task_cancellation(self)
+            # self._fire_instruments(event="CANCEL")
+
+    def sink(self):
+        if type(self)._instruments:
+            for instrument in type(self)._instruments:
+                instrument.on_sink(self)
+        # self._fire_instruments("SINK")
+
+    # def _fire_instruments(
+    #     self,
+    #     event: Literal[
+    #         "CANCEL",
+    #         "COMPLETE",
+    #         "CREATION",
+    #         "ERROR",
+    #         "EXECUTED",
+    #         "SCHEDULED",
+    #         "SINK",
+    #         "STAGED",
+    #     ],
+    # ):
+    #     for instr in iter(get_registered_instruments()):
+    #         try:
+    #             event_cb = instr.get_event_cb(instr, event)
+    #             event_cb(self)
+    #         except Exception as e:
+    #             self.get_logger().error(
+    #                 f"Error executing {event} callback for {instr}: {e}"
+    #             )
 
 
 class SyncRequestTaskModel(BaseRequestTaskModel[_R]):
@@ -294,13 +338,14 @@ class SyncRequestTaskModel(BaseRequestTaskModel[_R]):
         item = self.uuid if mode == "uuid" else self.make_request.model_dump_json()
 
         if self.make_request.priority == Priority.URGENT:
-            client.event.set()
+            client._pause_event.set()
             client.queue.insertleft(item)
-            client.event.clear()
+            client._pause_event.clear()
         else:
             client.queue.insertright(item)
 
         self.time_staged = dt.datetime.now().isoformat()
+        # self._fire_instruments("STAGED")
         if type(self)._instruments:
             for instrument in type(self)._instruments:
                 instrument.on_task_stageed(self)
@@ -341,7 +386,7 @@ class AsyncRequestTaskModel(BaseRequestTaskModel[_R]):
 
     def get_context(
         self,
-        task_var: contextvars.ContextVar["AsyncRequestTaskModel"],
+        task_var: contextvars.ContextVar["AsyncRequestTaskModel[_R]"],
     ) -> contextvars.Context:
         """
         Set the given task var and return the current context
@@ -380,6 +425,7 @@ class AsyncRequestTaskModel(BaseRequestTaskModel[_R]):
 
         self.time_staged = dt.datetime.now().isoformat()
         self.summary_json.time_staged = self.time_staged
+        # self._fire_instruments("STAGED")
         if type(self)._instruments:
             for instrument in type(self)._instruments:
                 instrument.on_task_stageed(self)
@@ -387,7 +433,6 @@ class AsyncRequestTaskModel(BaseRequestTaskModel[_R]):
 
     def get_wrapped_callback(
         self,
-        # loop: "asyncio.AbstractEventLoop",
         callback,
         done_callback: Optional[Callable] = None,
     ):
@@ -468,12 +513,12 @@ def get_sync_request_task_by_uuid(
 # asynchronous request tasks
 
 
-async def _assert_saved_async(task: "AsyncRequestTaskModel"):
+async def _assert_saved_async(task: "AsyncRequestTaskModel[_R]"):
     assert task.client_idx is not None
     return get_async_request_task_by_uuid(task.uuid, task.client_idx) is not None
 
 
-async def save_async_request_task(task: "AsyncRequestTaskModel"):
+async def save_async_request_task(task: "AsyncRequestTaskModel[_R]"):
     assert task.client_idx is not None
     from ..client.functions import client_from_idx
 
@@ -493,3 +538,196 @@ async def get_async_request_task_by_uuid(
 
         client = client_from_idx(client_idx)
         return await client.task_db.get_task(uuid)
+
+
+############################################################
+# Remote task models for making requests while a pooled
+# producer is running
+
+
+class RemoteTaskMixin(BaseModel):
+    kafka_confirm_topic: str
+    kafka_service: KafkaService = Field(default_factory=KafkaService, exclude=True)
+
+    class Config:
+        arbitrary_types_allowed = True  # Allow KafkaService as an arbitrary type
+
+    @staticmethod
+    def deserialize_confirmatory_message(message: bytes | str | None):
+        if message is None:
+            return
+        if isinstance(message, bytes):
+            message = message.decode()
+        return json_loads(message)
+
+    def _get_capacity_reservation_command(self, client_idx: int):
+        return CapacityCommand(
+            action="reserve",
+            capacity=1,
+            client_idx=client_idx,
+            confirm_topic=self.kafka_confirm_topic,
+            pid=os.getpid(),
+        )
+
+    def _get_capacity_unreservation_command(self, client_idx: int):
+        return CapacityCommand(
+            action="unreserve",
+            capacity=1,
+            client_idx=client_idx,
+            confirm_topic=self.kafka_confirm_topic,
+            pid=os.getpid(),
+        )
+
+    def _ensure_consumer_and_producer(self):
+        if not hasattr(self, "_consumer"):
+            if not self.kafka_service.has_consumer():
+                consumer = self.kafka_service.initialize_consumer(
+                    self.kafka_confirm_topic,
+                    value_deserializer=self.deserialize_confirmatory_message,
+                )
+            else:
+                consumer = list(self.kafka_service._consumers)[0]
+
+            self.set_consumer(consumer)
+
+        if not hasattr(self, "_producer"):
+            if not self.kafka_service.has_producer():
+                producer = self.kafka_service.initialize_producer(
+                    value_serializer=lambda v: json_dumps(v).encode()
+                )
+            else:
+                producer = list(self.kafka_service._producers)[0]
+
+            self.set_producer(producer)
+
+    def set_producer(self, producer: KafkaProducer):
+        self._producer = producer
+
+    def set_consumer(self, consumer: KafkaConsumer):
+        self._consumer = consumer
+
+    # def model_post_init(self, __context: Any) -> None:
+    # self.make_request.priority = Priority.URGENT
+    # self.make_request.send_protocol_dict = {"topic": self.kafka_confirm_topic}
+
+
+class RemoteSyncTaskModel(SyncRequestTaskModel[_R], RemoteTaskMixin):
+
+    def model_post_init(self, __context: Any) -> None:
+        self.make_request.priority = Priority.URGENT
+        self.make_request.send_protocol_dict = {"topic": self.kafka_confirm_topic}
+
+    def execute(self):
+        assert self.client_idx is not None, "task was never assigned"
+        self._ensure_consumer_and_producer()
+
+        command = self._get_capacity_reservation_command(self.client_idx)
+
+        capacity_topic = f"async-schwab-producer-{self.client_idx}"
+        self.kafka_service.publish(
+            capacity_topic, producer=self._producer, value=command
+        ).flush()
+        self.kafka_service.listen(self._consumer)
+
+        confirmed = False
+        while not confirmed:
+            message_batch = self._consumer.poll(max_records=1)
+            for tp, messages in message_batch.items():
+                for message in iter(messages):
+                    message_value = message.value
+                    if message_value is not None:
+                        self.get_logger().info(
+                            f"Received confirmatory message {json_dumps(message_value)}"
+                        )
+                        confirmed = True
+                        break
+
+        self.save()
+        self.stage("uuid")
+
+        # this replaces the former consumer.subscription
+        self.kafka_service._subscription_handler._subscribe(
+            self._consumer, self.kafka_confirm_topic
+        )
+
+        while True:
+            message_batch = self._consumer.poll(max_records=1)
+            for tp, messages in message_batch.items():
+                for message in iter(messages):
+                    message_value = message.value
+                    if message_value is not None:
+                        self.get_logger().info(
+                            f"Received data message {json_dumps(message_value)[:100]} .."
+                        )
+                        self.summary_json.set_response_data(message_value)
+                        self.complete(capacity_topic)
+                        return
+
+    def complete(self, capacity_topic):
+        assert self.client_idx
+        command = self._get_capacity_unreservation_command(self.client_idx)
+        self.kafka_service.publish(
+            capacity_topic, value=command, producer=self._producer
+        ).flush()
+        return super().complete()
+
+
+class RemoteAsyncTaskModel(AsyncRequestTaskModel[_R], RemoteTaskMixin):
+
+    def model_post_init(self, __context: Any) -> None:
+        self.make_request.priority = Priority.URGENT
+        self.make_request.send_protocol_dict = {"topic": self.kafka_confirm_topic}
+
+    async def execute(self):
+        assert self.client_idx is not None, "client was never assigned"
+        self._ensure_consumer_and_producer()
+
+        command = self._get_capacity_reservation_command(self.client_idx)
+
+        capacity_topic = f"async-schwab-producer-{self.client_idx}"
+        self.kafka_service.publish(
+            capacity_topic, producer=self._producer, value=command
+        ).flush()
+        self.kafka_service.listen(self._consumer)
+
+        confirmed = False
+        while not confirmed:
+            message_batch = self._consumer.poll(max_records=1)
+            for tp, messages in message_batch.items():
+                for message in iter(messages):
+                    message_value = message.value
+                    if message_value is not None:
+                        self.get_logger().info(
+                            f"Received confirmatory message {json_dumps(message_value)}"
+                        )
+                        confirmed = True
+                        break
+
+        await self.save()
+        await self.stage("uuid")
+
+        # this replaces the former consumer.subscription
+        self.kafka_service._subscription_handler._subscribe(
+            self._consumer, self.kafka_confirm_topic
+        )
+
+        while True:
+            message_batch = self._consumer.poll(max_records=1)
+            for tp, messages in message_batch.items():
+                for message in iter(messages):
+                    message_value = message.value
+                    if message_value is not None:
+                        self.get_logger().info(
+                            f"Received data message {json_dumps(message_value)[:100]} .."
+                        )
+                        self.summary_json.set_response_data(message_value)
+                        self.complete(capacity_topic)
+                        return
+
+    def complete(self, capacity_topic):
+        assert self.client_idx
+        command = self._get_capacity_unreservation_command(self.client_idx)
+        self.kafka_service.publish(
+            capacity_topic, value=command, producer=self._producer
+        ).flush()
+        return super().complete()
