@@ -99,8 +99,6 @@ class BaseSchwabClient(ClassNameLoggerMixin):
         "%(asctime)s %(levelname)s %(name)s<%(idx)d> %(message)s", defaults={"idx": 0}
     )
     PROPAGATE = False
-    # FH_TYPE = "RotatingFileHandler"
-    # FH_TYPE_KWARGS = {"maxBytes": 1_048_576, "backupCount": 500_000}
 
     _DEFAULT_SESSION_FACTORY: ClassVar[SessionFactoryT] = requests.Session
     config: ClassVar[ConfigDict] = {
@@ -220,14 +218,6 @@ class BaseSchwabClient(ClassNameLoggerMixin):
         else:
             self.request_session = self._sessionFactory()
             self.request_session = None
-
-        # if session_factory is None:
-        #     self._sessionFactory = self.__class__._DEFAULT_SESSION_FACTORY
-        #     self.request_session = self._sessionFactory()
-        #     # self.request_session.verify = True
-        # else:
-        #     self._sessionFactory = session_factory
-        #     self.request_session = self._sessionFactory()
 
         self._response_handler: ResponseHandler = response_handler or ResponseHandler(
             self
