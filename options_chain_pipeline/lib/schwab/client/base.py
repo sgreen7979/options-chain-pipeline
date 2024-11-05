@@ -1,32 +1,89 @@
 # Adapted from https://github.com/areed1192/td-ameritrade-python-api by Alex Reed
-import base64
+import asyncio
 import datetime as dt
 import json
+import os
 import pathlib
 import time
-from typing import Dict
-from typing import List
-from typing import Optional
-from typing import TYPE_CHECKING
-from typing import Union
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    ClassVar,
+    Dict,
+    List,
+    Literal,
+    Optional,
+    Protocol,
+    Sequence,
+    TypeVar,
+    Union,
+    cast,
+    overload,
+)
 import urllib.parse
 
 import requests
 
-from options_chain_pipeline.lib.utils.logging import get_logger
+from daily.utils.logging import (
+    get_logger,
+    ClassNameLoggerMixin,
+    LoggerAdapter,
+    Formatter,
+)
+from daily.utils.requests_dataclasses import _extract_params_from_url
 
+from ..credentials.functions import get_credentials
 from ..enums import VALID_CHART_VALUES
-from ..option_chain import OptionChain as OptionChainParams
 from .. import exceptions as exc
+from ..expirations import ExpirationChainResponse
+from ..handlers.base import ResponseHandler
+from ..option_chain.models import OptionsChainResponse
+from ..market_hours import (
+    MarketHoursResponse,
+    ############################
+    BondOnlyResponse,
+    OptionOnlyResponse,
+    EquityOnlyResponse,
+    FutureOnlyResponse,
+    ############################
+    BondEquityResponse,
+    BondFutureResponse,
+    BondOptionResponse,
+    EquityFutureResponse,
+    OptionFutureResponse,
+    OptionEquityResponse,
+    ############################
+    BondEquityFutureResponse,
+    BondOptionEquityResponse,
+    BondOptionFutureResponse,
+    OptionEquityFutureResponse,
+    ############################
+    AllMarketsResponse,
+)
+from ..option_chain import OptionsChainParams
 from ..orders import Order
+from ..preferences import UserPreferencesResponse
+from ..session.session_proto import SyncSessionProto
+from .types import ConfigDict
 
 if TYPE_CHECKING:
-    from .types import ConfigDict
+    from ..credentials import SchwabCredentials
 
-logger = get_logger(__name__, ch=True)
+LOG_LEVEL = "DEBUG"
+logger = get_logger(__name__, LOG_LEVEL)
+
+_T = TypeVar("_T")
+_H_co = TypeVar("_H_co", bound=ResponseHandler, covariant=True)
+_SessionProto = SyncSessionProto[requests.Response]
+# _ModeT = TypeVar("_ModeT", bound=Literal["form", "json"])
+_ModeT = Literal["form", "json"]
 
 
-class BaseSchwabClient:
+class SessionFactoryT(Protocol):
+    def __call__(*args: Any, **kwargs: Any) -> _SessionProto: ...
+
+
+class BaseSchwabClient(ClassNameLoggerMixin):
     """Schwab API Client Class.
 
     Implements OAuth 2.0 Authorization Co-de Grant workflow, handles configuration
@@ -35,15 +92,82 @@ class BaseSchwabClient:
 
     """
 
+    LEVEL = "INFO"
+    CH = True
+    FORMATTER = Formatter(
+        "%(asctime)s %(levelname)s %(name)s<%(idx)d> %(message)s", defaults={"idx": 0}
+    )
+    PROPAGATE = False
+    # FH_TYPE = "RotatingFileHandler"
+    # FH_TYPE_KWARGS = {"maxBytes": 1_048_576, "backupCount": 500_000}
+
+    _DEFAULT_SESSION_FACTORY: ClassVar[SessionFactoryT] = requests.Session
+    config: ClassVar[ConfigDict] = {
+        "api_endpoint": "https://api.schwabapi.com",
+        "auth_endpoint": "https://api.schwabapi.com/v1/oauth/authorize?",
+        "token_endpoint": "https://api.schwabapi.com/v1/oauth/token",
+        "refresh_enabled": True,
+        "refresh_token_expires_in": 604800,  # 7 days
+        "rolling_sixty_limit": 120,
+    }
+
+    @overload
     def __init__(
         self,
-        client_id: str,
-        client_secret: str,
-        redirect_uri: str,
-        credentials_path: str,
+        idx: Optional[int] = None,
+        client_id: Optional[str] = None,
+        client_secret: Optional[str] = None,
+        redirect_uri: Optional[str] = None,
+        credentials_path: Optional[str] = None,
         account_number: Optional[str] = None,
         auth_flow: str = "default",
         _do_init: bool = True,
+        *,
+        credentials: "SchwabCredentials",
+        response_handler: Optional[ResponseHandler] = None,
+        session_factory: Optional[SessionFactoryT] = None,
+        token_writer=None,
+        token_loader=None,
+        **kwargs,
+    ) -> None: ...
+
+    @overload
+    def __init__(
+        self,
+        idx: int,
+        client_id: Optional[str] = None,
+        client_secret: Optional[str] = None,
+        redirect_uri: Optional[str] = None,
+        credentials_path: Optional[str] = None,
+        account_number: Optional[str] = None,
+        auth_flow: str = "default",
+        _do_init: bool = True,
+        *,
+        credentials: Optional["SchwabCredentials"] = None,
+        response_handler: Optional[ResponseHandler] = None,
+        session_factory: Optional[SessionFactoryT] = None,
+        token_writer=None,
+        token_loader=None,
+        **kwargs,
+    ) -> None: ...
+
+    def __init__(
+        self,
+        idx: Optional[int] = None,
+        client_id: Optional[str] = None,
+        client_secret: Optional[str] = None,
+        redirect_uri: Optional[str] = None,
+        credentials_path: Optional[str] = None,
+        account_number: Optional[str] = None,
+        auth_flow: str = "default",
+        _do_init: bool = True,
+        *,
+        credentials: Optional["SchwabCredentials"] = None,
+        response_handler: Optional[ResponseHandler] = None,
+        session_factory: Optional[SessionFactoryT] = None,
+        token_writer=None,
+        token_loader=None,
+        **kwargs,
     ) -> None:
         """
         ### Usage:
@@ -58,47 +182,67 @@ class BaseSchwabClient:
             )
             >>> schwab_client.login()
         """
+        if credentials is not None:
+            self._credentials = credentials
+        elif idx is not None:
+            self._credentials = get_credentials(idx)
+        else:
+            raise ValueError("credentials or idx must be set")
 
-        # Define the configuration settings.
-        self.config: "ConfigDict" = {
-            "api_endpoint": "https://api.schwabapi.com",
-            "auth_endpoint": "https://api.schwabapi.com/v1/oauth/authorize?",
-            "token_endpoint": "https://api.schwabapi.com/v1/oauth/token",
-            "refresh_enabled": True,
-            "refresh_token_expires_in": 604800,  # 7 days
-            "rolling_sixty_limit": 120,
-        }
+        self.account_number: Optional[str] = self._credentials.account_number
+        self.base64_client_id: str = self._credentials._base64_client_id()
+        self.client_id: str = self._credentials.api_key
+        self.client_secret: str = self._credentials.secret
+        self.credentials_path: pathlib.Path = pathlib.Path(self._credentials.token_path)
+        self.idx: int = self._credentials.idx
+        self.redirect_uri: str = self._credentials.redirect_uri
 
         # Define the initalized state, these are the default values.
-        self.state = {"access_token": None, "refresh_token": None}
+        self.state: dict = {"access_token": None, "refresh_token": None}
+        self.auth_flow: str = auth_flow
 
-        self.auth_flow = auth_flow
-        self.redirect_uri = redirect_uri
-        self.account_number = account_number
-        self.credentials_path = pathlib.Path(credentials_path)
+        # Define a new attribute called 'authstate' and initialize to `False`. This will be used by our login function.
+        self.authstate: bool = False
 
-        # define a new attribute called 'authstate' and initialize to `False`. This will be used by our login function.
-        self.authstate = False
+        self._token_loader = token_loader
+        self._token_writer = token_writer
 
         # call the state_manager method and update the state to init (initalized)
         if _do_init:
             self._state_manager("init")
 
-        # Initalize the client.
-        self.client_id = client_id
-        self.client_secret = client_secret
-        self.base64_client_id = self._base64_client_id(
-            self.client_id, self.client_secret
+        # if (sessionFactory := kwargs.pop("sessionFactory", None)) is not None:
+        self._sessionFactory = session_factory or type(self)._DEFAULT_SESSION_FACTORY
+
+        if type(self).__name__.lower().startswith("async"):
+            self.request_session = None
+        else:
+            self.request_session = self._sessionFactory()
+            self.request_session = None
+
+        # if session_factory is None:
+        #     self._sessionFactory = self.__class__._DEFAULT_SESSION_FACTORY
+        #     self.request_session = self._sessionFactory()
+        #     # self.request_session.verify = True
+        # else:
+        #     self._sessionFactory = session_factory
+        #     self.request_session = self._sessionFactory()
+
+        self._response_handler: ResponseHandler = response_handler or ResponseHandler(
+            self
         )
 
-        self.request_session = requests.Session()
-        self.request_session.verify = True
+    def get_logger_adapter(self):
+        return LoggerAdapter(self.__class__.get_logger(), extra={"idx": self.idx})
 
-    @staticmethod
-    def get_logger():
-        return logger
+    @property
+    def response_handler(self):
+        return self._response_handler
 
-    def _state_manager(self, action: str) -> None:
+    def set_response_handler(self, rh) -> None:
+        self._response_handler = rh
+
+    def _state_manager(self, action: Literal["init", "save"]) -> None:
         """Manages the session state.
 
         Manages the self.state dictionary. Initalize State will set
@@ -112,17 +256,25 @@ class BaseSchwabClient:
             'save' -- Save the current state.
         """
 
-        credentials_file_exists = self.credentials_path.exists()
+        if self.credentials_path.exists() and not self.credentials_path.read_text():
+            self.credentials_path.unlink()
 
         # If the file exists then load it.
-        if action == "init" and credentials_file_exists:
+        if action == "init" and self.credentials_path.exists():
+
             with open(file=self.credentials_path, mode="r") as json_file:
-                self.state.update(json.load(json_file))
+                if self._token_loader is not None:
+                    self.state.update(self._token_loader.load(json_file))
+                else:
+                    self.state.update(json.load(json_file))
 
         # Saves the credentials file.
         elif action == "save":
             with open(file=self.credentials_path, mode="w+") as json_file:
-                json.dump(obj=self.state, fp=json_file, indent=4)
+                if self._token_writer is not None:
+                    self._token_writer.write(self.state, json_file)
+                else:
+                    json.dump(obj=self.state, fp=json_file, indent=4)
 
     def login(self) -> bool:
         """Logs the user into the Broker API.
@@ -139,16 +291,18 @@ class BaseSchwabClient:
 
         # Only attempt silent SSO if the credential file exists.
         # only at login
+        exists = self.credentials_path.exists()
+
         if (
-            self.credentials_path.exists() and self._silent_sso()
+            exists and self._silent_sso()
         ):  # schwab_credentials exists and validate_tokens is True
             self.authstate = True
-            return True
+            # return True
         else:
             # no credentials file or the refresh_token expired -> triggers the oauth flow
-            self.oauth()
-            self.authstate = True
-            return True
+            self.authstate = self.oauth()
+            # return self.authstate
+        return self.authstate
 
     def logout(self) -> None:
         """Clears the current Broker Connection state."""
@@ -158,14 +312,50 @@ class BaseSchwabClient:
 
     def __del__(self):
         # clear session
-        if self.request_session:
-            self.request_session.close()
+        # if hasattr(self, "request_session") and self.request_session is not None:
+        #     self.request_session.close()
+        pass
 
     """
     -----------------------------------------------------------
     THIS BEGINS THE AUTH SECTION.
     -----------------------------------------------------------
     """
+
+    def _requires_oauth(self) -> bool:
+        if (
+            "refresh_token_expires_at" in self.state
+            and "access_token_expires_at" in self.state
+        ):
+            # should be true if _token_save already ran as part of oauth flow
+
+            # Grab the refresh_token expire Time.
+            refresh_token_exp = self.state["refresh_token_expires_at"]
+            assert isinstance(refresh_token_exp, float)
+            refresh_token_ts = dt.datetime.fromtimestamp(refresh_token_exp)
+            # Grab the Expire Threshold
+            refresh_token_exp_threshold = refresh_token_ts - dt.timedelta(days=1)
+            # Convert Thresholds to Seconds.
+            refresh_token_exp_threshold = refresh_token_exp_threshold.timestamp()
+            # Check the Refresh Token first, is expired or expiring soon?
+            self.get_logger_adapter().debug(
+                f"The refresh token will expire at: {self.state['refresh_token_expires_at_date']}"
+            )
+            if dt.datetime.now().timestamp() > refresh_token_exp_threshold:
+                return True
+            # Grab the access_token expire Time.
+            access_token_exp = self.state["access_token_expires_at"]
+            assert isinstance(access_token_exp, float)
+            access_token_ts = dt.datetime.fromtimestamp(access_token_exp)
+            # Grab the Expire Thresholds.
+            access_token_exp_threshold = access_token_ts - dt.timedelta(minutes=5)
+            # Convert Thresholds to Seconds.
+            access_token_exp_threshold = access_token_exp_threshold.timestamp()
+            # See if we need a new Access Token.
+            if dt.datetime.now().timestamp() > access_token_exp_threshold:
+                return True
+
+        return False
 
     def get_account_number_hash_values(self) -> dict:
         endpoint = "trader/v1/accounts/accountNumbers"
@@ -197,40 +387,45 @@ class BaseSchwabClient:
                 data=data,
             )
             if response.ok:
-                logger.info(f"Grab acces token resp: {response.json()}")
+                self.get_logger_adapter().info(
+                    f"Grab acces token resp: {response.json()}"
+                )
                 return self._token_save(
                     token_dict=response.json(), refresh_token_from_oauth=False
                 )
             else:
                 # Log the error
-                logger.error(
+                self.get_logger_adapter().error(
                     f"Failed to refresh access token. Status code: {response.status_code}, Reason: {response.text}"
                 )
                 if "expired" in response.text:
-                    logger.info("oauth called from grab_access_token")
+                    self.get_logger_adapter().info(
+                        "oauth called from grab_access_token"
+                    )
                     self.oauth()
         except requests.RequestException as e:
             # Log the exception
-            logger.error(f"Failed to refresh access token: {e}")
+            self.get_logger_adapter().error(f"Failed to refresh access token: {e}")
             raise
 
-    # def oauth(self) -> None:
-    def oauth(self) -> None:
-        # called by login(no credentials file) and validate_tokens (a token is expired) or _make_request if response not OK
+    def oauth(self) -> bool:
         """Runs the oAuth process for the Broker API."""
+        # called by login(no credentials file) and validate_tokens (a token is expired) or _make_request if response not OK
         # Create the Auth URL.
         url = f"{self.config['auth_endpoint']}client_id={self.client_id}&redirect_uri={self.redirect_uri}"
 
-        print(f"Please go to URL provided to authorize your account: {url}")
+        print(
+            f"Please go to URL provided to authorize your account(idx={self.idx}): {url}"  # type: ignore
+        )
         # Paste it back and send it to exchange_code_for_token.
         redirect_url = input("Paste the full URL redirect here: ")
 
-        logger.info(f"redirect_url: {redirect_url}")
+        self.get_logger_adapter().debug(f"redirect_url: {redirect_url}")
         self.code = self._extract_redirect_code(redirect_url)
-        logger.info(f"self.code: {self.code}")
+        self.get_logger_adapter().debug(f"self.code: {self.code}")
 
         # Exchange the Auth Code for an Access Token.
-        self.exchange_code_for_token()
+        return self.exchange_code_for_token()
 
     def exchange_code_for_token(self):
         # called by oauth
@@ -248,7 +443,7 @@ class BaseSchwabClient:
             "code": url_code,
             "redirect_uri": self.redirect_uri,
         }
-        logger.info(f"data = {data}")
+        self.get_logger_adapter().info(f"data = {data}")
         # Make the request.
         response = requests.post(
             url=self.config["token_endpoint"],
@@ -259,12 +454,14 @@ class BaseSchwabClient:
         )
 
         if response.ok:
-            logger.info(f"Exchange code for token resp: {response.json()}")
+            self.get_logger_adapter().info(
+                f"Exchange code for token resp: {response.json()}"
+            )
             self._token_save(token_dict=response.json(), refresh_token_from_oauth=True)
             return True
         else:
             # Handle the case where the request fails
-            logger.info(
+            self.get_logger_adapter().info(
                 f"Exchange_code_for_token request failed {response.status_code}, {response.text}"
             )
             return False
@@ -279,7 +476,6 @@ class BaseSchwabClient:
             Returns `True` if the tokens are not expired, `False` if
             they are.
         """
-
         if (
             "refresh_token_expires_at" in self.state
             and "access_token_expires_at" in self.state
@@ -295,7 +491,7 @@ class BaseSchwabClient:
             # Convert Thresholds to Seconds.
             refresh_token_exp_threshold = refresh_token_exp_threshold.timestamp()
             # Check the Refresh Token first, is expired or expiring soon?
-            logger.info(
+            self.get_logger_adapter().debug(
                 f"The refresh token will expire at: {self.state['refresh_token_expires_at_date']}"
             )
             if dt.datetime.now().timestamp() > refresh_token_exp_threshold:
@@ -310,14 +506,13 @@ class BaseSchwabClient:
             access_token_exp_threshold = access_token_exp_threshold.timestamp()
             # See if we need a new Access Token.
             if dt.datetime.now().timestamp() > access_token_exp_threshold:
-                logger.info("Grabbing new access token...")
+                self.get_logger_adapter().debug("Grabbing new access token...")
                 # print("Grabbing new access token...")
                 self.grab_access_token()
             return True
         else:
             # token expire times are not in self.state
-            self.oauth()
-            return True
+            return self.oauth()
 
     def _silent_sso(self) -> bool:
         # called by login
@@ -409,7 +604,7 @@ class BaseSchwabClient:
         return f"{self.config['api_endpoint']}/{endpoint}"
 
     def _create_request_headers(
-        self, mode: str | None = None, is_access_token_request: bool = False
+        self, mode: Optional[_ModeT] = None, is_access_token_request: bool = False
     ) -> dict:  # called by _make_request, grab_access_token, exchange_code_for_token
         """Create the headers for a request.
 
@@ -446,7 +641,7 @@ class BaseSchwabClient:
         self,
         method: str,
         endpoint: str,
-        mode: Optional[str] = None,
+        mode: Optional[_ModeT] = None,
         params: Optional[dict] = None,
         data: Optional[dict] = None,
         json: Optional[dict] = None,
@@ -467,91 +662,67 @@ class BaseSchwabClient:
             json=json,
         ).prepare()
 
+    def _get_response(self, request: "requests.PreparedRequest", **kwargs):
+        request_session = self.request_session or self._sessionFactory()
+        # kwargs.setdefault("stream", request_session.stream)
+        # kwargs.setdefault("cert", request_session.cert)
+        return request_session.get(
+            url=str(request.url),
+            headers=request.headers,
+            verify=True,
+            **kwargs,
+        )
+
+    def _handle_response(self, *args, **kwargs):
+        return self.response_handler.handle(*args, **kwargs)
+
     def _make_request(
         self,
         method: str,
         endpoint: str,
-        mode: Optional[str] = None,
         params: Optional[dict] = None,
-        data: Optional[dict] = None,
-        json: Optional[dict] = None,
-        order_details: bool = False,
+        **kwargs,
+        # mode: Optional[str] = None,
+        # data: Optional[dict] = None,
+        # json: Optional[dict] = None,
+        # order_details: bool = False,
+        # incl_fetch_time: bool = False,
+        # multi: Optional[int] = None,
+        # incl_response: bool = False,
+        # **kwargs,
     ) -> dict:
+        # ) -> tuple["requests.Response", "requests.PreparedRequest", dict]:
         # Make sure the token is valid if it's not a Token API call.
         self.validate_tokens()
 
         prepared_request = self._prepare_request(
             method=method,
             endpoint=endpoint,
-            mode=mode,
+            # mode=mode,
+            mode=kwargs.get("mode", None),
+            # params=params,
             params=params,
-            data=data,
-            json=json,
+            data=kwargs.get("data", None),
+            json=kwargs.get("json", None),
         )
 
-        # Re-use session.
-        request_session = self.request_session or requests.Session()
-        # request_session = self.request_session
+        response = self._get_response(prepared_request, timeout=15)
 
-        # Send the request.
-        response = request_session.send(request=prepared_request, timeout=15)
+        return self.response_handler.handle(
+            response,
+            prepared_request,
+            kwargs,
+        )
 
-        # # grab the status code
-        # status_code = response.status_code
+    @overload
+    def _prepare_arguments_list(self, parameter_list: List[_T]) -> List[_T]: ...
 
-        if not response.ok:
-            logger.error(f"make_requests error = {response.text}")
-            if "refresh" in response.text and "expired" in response.text:
-                # already passed validate_tokens for expirations so calculated time must be off...?
-                try:
-                    logger.error("oauth called from _make_request")
-                    self.oauth()
-                except Exception as e:
-                    raise exc.GeneralError(message=response.text) from e
-            else:
-                self._handle_request_error(response)
+    @overload
+    def _prepare_arguments_list(self, parameter_list: Sequence[_T]) -> Sequence[_T]: ...
 
-        # else:  # Then response is OK
-        response_headers = response.headers
-        # Grab the order id, if it exists.
-        if "Location" in response_headers:
-            order_id = response_headers["Location"].split("orders/")[1]
-        else:
-            order_id = ""
-
-        # Return response data
-        if order_details:
-            return {
-                "order_id": order_id,
-                "headers": response.headers,
-                "content": response.content,
-                "status_code": response.status_code,
-                "request_body": prepared_request.body,
-                "request_method": prepared_request.method,
-            }
-        else:
-            return response.json()
-
-    def _handle_request_error(self, response: requests.Response):
-        message = f"[{response.status_code}]: {response.text}"
-        if response.status_code == 400:
-            raise exc.NotNulError(message=message)
-        elif response.status_code == 401:
-            raise exc.TknExpError(message=message)
-        elif response.status_code == 403:
-            raise exc.ForbidError(message=message)
-        elif response.status_code == 404:
-            raise exc.NotFndError(message=message)
-        elif response.status_code == 429:
-            raise exc.ExdLmtError(message=message)
-        elif response.status_code in (500, 503):
-            raise exc.ServerError(message=message)
-        elif response.status_code > 400:
-            raise exc.GeneralError(message=message)
-        else:
-            raise exc.GeneralError(message=message)
-
-    def _prepare_arguments_list(self, parameter_list: List[str]) -> List[str]:
+    def _prepare_arguments_list(
+        self, parameter_list: Union[List[_T], Sequence[_T]]
+    ) -> Union[List[_T], Sequence[_T]]:
         """
         Prepares a list of parameter values for certain API calls.
 
@@ -575,10 +746,38 @@ class BaseSchwabClient:
 
         return parameter_list
 
+    def _prepare_quotes_query(
+        self,
+        instruments: List[str],
+        fields: Optional[List[str]] = None,
+        indicative: bool = False,
+    ) -> Dict:
+        params = {}
+        instruments = self._prepare_arguments_list(parameter_list=instruments)
+        # _prepared_query["instruments"] = instruments
+
+        # Prepare fields list if provided.
+        if fields:
+            fields = self._prepare_arguments_list(parameter_list=fields)
+
+        # Build the params dictionary.
+        params = {"symbols": instruments}
+        if fields:
+            params["fields"] = fields
+        params["indicative"] = indicative  # type: ignore
+
+        # Define the endpoint.
+        endpoint = "marketdata/v1/quotes"
+
+        return {
+            "endpoint": endpoint,
+            "params": params,
+        }
+
     def get_quotes(
         self,
         instruments: List[str],
-        fields: List[str] | None = None,
+        fields: Optional[List[str]] = None,
         indicative: bool = False,
     ) -> Dict:
         """
@@ -622,7 +821,9 @@ class BaseSchwabClient:
         endpoint = "marketdata/v1/quotes"
 
         # Return the response of the get request.
-        return self._make_request(method="get", endpoint=endpoint, params=params)
+        return self._make_request(
+            method="get", endpoint=endpoint, params=params, multi=len(instruments)
+        )
 
     def get_orders_path(
         self,
@@ -768,7 +969,6 @@ class BaseSchwabClient:
         # define the endpoint
         endpoint = f"trader/v1/accounts/{account}/orders/{order_id}"
 
-        # make the request
         return self._make_request(
             method="delete", endpoint=endpoint, order_details=True
         )
@@ -830,70 +1030,48 @@ class BaseSchwabClient:
 
         # Make the request
         endpoint = f"trader/v1/accounts/{account}/orders/{order_id}"
+
         return self._make_request(
-            method="put", endpoint=endpoint, mode="json", json=order, order_details=True
+            method="put",
+            endpoint=endpoint,
+            mode="json",
+            json=order,
+            order_details=True,
         )
 
     def get_transactions(
         self,
         account: str,
-        transaction_type: Optional[str] = None,
+        transaction_type: Optional[
+            Literal[
+                "TRADE",
+                "RECEIVE_AND_DELIVER",
+                "DIVIDEND_OR_INTEREST",
+                "ACH_RECEIPT",
+                "ACH_DISBURSEMENT",
+                "CASH_RECEIPT",
+                "CASH_DISBURSEMENT",
+                "ELECTRONIC_FUND",
+                "WIRE_OUT",
+                "WIRE_IN",
+                "JOURNAL",
+                "MEMORANDUM",
+                "MARGIN_CALL",
+                "MONEY_MARKET",
+                "SMA_ADJUSTMENT",
+            ]
+        ] = None,
         symbol: Optional[str] = None,
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         transaction_id: Optional[str] = None,
     ) -> Dict:
-        """Queries the transactions for an account.
-
-        Serves as the mechanism to make a request to the "Get Transactions" and "Get Transaction" Endpoint.
-        If one `transaction_id` is provided a "Get Transaction" request will be made and if it is not provided
-        then a "Get Transactions" request will be made.
-
-        ### Documentation:
-        ----
-
-        ### Arguments:
-        ----
-
-        account {str} -- Required -- The account number you wish to recieve
-        transactions for.
-
-        transaction_id: If transaction_id, no other args apply. The transaction ID you wish to search. If this is
-            specifed a "Get Transaction" request is made. Should only be
-            used if you wish to return one transaction, (a known transaction_id number)
-
-        transaction_type: The type of transaction. Only
-            transactions with the specified type will be returned.
-            Valid values are the following: see below
-
-        symbol The symbol in the specified transaction. Only transactions
-            with the specified symbol will be returned.
-
-        start_date: Only transactions after the Start Date will be returned.
-            Note: The maximum date range is one year. Valid ISO-8601
-            formats are: yyyy-MM-dd'T'HH:mm:ss.SSSZ
-
-        end_date: Only transactions before the End Date will be returned.
-            Note: The maximum date range is one year. Valid ISO-8601
-            formats are: yyyy-MM-dd'T'HH:mm:ss.SSSZ
-
-        ### Usage:
-        ----
-            >>> schwab_client.get_transactions(account = 'MyAccountNumber', transaction_type = '[]', start_date = 'yyyy-MM-dd'T'HH:mm:ss.SSSZ', end_date = 'yyyy-MM-dd'T'HH:mm:ss.SSSZ')
-            >>> schwab_client.get_transactions(account = 'MyAccountNumber', transaction_type = 'TRADE' start_date = 'yyyy-MM-dd'T'HH:mm:ss.SSSZ', end_date = 'yyyy-MM-dd'T'HH:mm:ss.SSSZ')
-            >>> schwab_client.get_transactions(transaction_id = 'MyTransactionID')
-
-        """
-        # Set default values for start_date and end_date if not provided
-        # Mimics TDA legacy API which did not 'require' these parameters
         if not start_date:
             start_date = self._utcformat(dt.datetime.now() - dt.timedelta(days=60))
-            # print(start_date)
         else:
             pass  # make sure it's within 60 days from now
         if not end_date:
             end_date = self._utcformat(dt.datetime.now())
-            # print(end_date)
 
         # default to a "Get Transaction" Request if anything else is passed through along with the transaction_id.
         if transaction_id is not None:
@@ -918,42 +1096,35 @@ class BaseSchwabClient:
                 "JOURNAL",
                 "MEMORANDUM",
                 "MARGIN_CALL",
-                " MONEY_MARKET",
+                "MONEY_MARKET",
                 "SMA_ADJUSTMENT",
             ]:
-                # print("The type of transaction type you specified is not valid.")
-                logger.error("The type of transaction type you specified is not valid.")
+                self.get_logger_adapter().error(
+                    "The type of transaction type you specified is not valid."
+                )
                 raise ValueError("Bad Input")
 
         # if transaction_id is not none, it means we need to make a request to the get_transaction endpoint.
         if transaction_id:
-            # define the endpoint
             endpoint = f"trader/v1/accounts/{account}/transactions/{transaction_id}"
-
-            # return the response of the get request.
             return self._make_request(method="get", endpoint=endpoint)
 
         # if it isn't then we need to make a request to the get_transactions endpoint.
         else:
-            # build the params dictionary
             params = {
                 "types": transaction_type_tuple,
                 "symbol": symbol,
                 "startDate": start_date_tuple,
                 "endDate": end_date,
             }
-            # print(f"get transaction params: {params}")
-            logger.info(f"get transaction params: {params}")
+            self.get_logger_adapter().info(f"get transaction params: {params}")
             if account is None and self.account_number:
                 account = self.account_number
 
-            # define the endpoint
             endpoint = f"trader/v1/accounts/{account}/transactions"
-
-            # return the response of the get request.
             return self._make_request(method="get", endpoint=endpoint, params=params)
 
-    def get_preferences(self) -> Dict:
+    def get_preferences(self) -> UserPreferencesResponse:
         """Get's User Preferences for a specific account.
         ### Documentation:
         ----
@@ -970,7 +1141,8 @@ class BaseSchwabClient:
         # define the endpoint
         endpoint = "trader/v1//userPreference"
         # return the response of the get request.
-        return self._make_request(method="get", endpoint=endpoint)
+        resp_data = self._make_request(method="get", endpoint=endpoint)
+        return cast(UserPreferencesResponse, resp_data)
 
     def search_instruments(self, symbol: str, projection: Optional[str] = None) -> Dict:
         """Search or retrieve instrument data, including fundamental data.
@@ -1067,7 +1239,425 @@ class BaseSchwabClient:
         # return the response of the get request.
         return self._make_request(method="get", endpoint=endpoint)
 
-    def get_market_hours(self, markets: List[str], date: Optional[str] = None) -> Dict:
+    @overload
+    def get_market_hours(
+        self, markets: Sequence[Literal["OPTION"]], date: Optional[str] = None
+    ) -> OptionOnlyResponse: ...
+
+    @overload
+    def get_market_hours(
+        self, markets: Sequence[Literal["BOND"]], date: Optional[str] = None
+    ) -> BondOnlyResponse: ...
+
+    @overload
+    def get_market_hours(
+        self, markets: Sequence[Literal["FUTURE"]], date: Optional[str] = None
+    ) -> FutureOnlyResponse: ...
+
+    @overload
+    def get_market_hours(
+        self, markets: Sequence[Literal["EQUITY"]], date: Optional[str] = None
+    ) -> EquityOnlyResponse: ...
+
+    @overload
+    def get_market_hours(
+        self, markets: Sequence[Literal["BOND", "EQUITY"]], date: Optional[str] = None
+    ) -> BondEquityResponse: ...
+
+    @overload
+    def get_market_hours(
+        self, markets: Sequence[Literal["EQUITY", "BOND"]], date: Optional[str] = None
+    ) -> BondEquityResponse: ...
+
+    @overload
+    def get_market_hours(
+        self, markets: Sequence[Literal["BOND", "FUTURE"]], date: Optional[str] = None
+    ) -> BondFutureResponse: ...
+
+    @overload
+    def get_market_hours(
+        self, markets: Sequence[Literal["FUTURE", "BOND"]], date: Optional[str] = None
+    ) -> BondFutureResponse: ...
+
+    @overload
+    def get_market_hours(
+        self, markets: Sequence[Literal["BOND", "OPTION"]], date: Optional[str] = None
+    ) -> BondOptionResponse: ...
+
+    @overload
+    def get_market_hours(
+        self, markets: Sequence[Literal["OPTION", "BOND"]], date: Optional[str] = None
+    ) -> BondOptionResponse: ...
+
+    @overload
+    def get_market_hours(
+        self, markets: Sequence[Literal["EQUITY", "FUTURE"]], date: Optional[str] = None
+    ) -> EquityFutureResponse: ...
+
+    @overload
+    def get_market_hours(
+        self, markets: Sequence[Literal["FUTURE", "EQUITY"]], date: Optional[str] = None
+    ) -> EquityFutureResponse: ...
+
+    @overload
+    def get_market_hours(
+        self, markets: Sequence[Literal["OPTION", "FUTURE"]], date: Optional[str] = None
+    ) -> OptionFutureResponse: ...
+
+    @overload
+    def get_market_hours(
+        self, markets: Sequence[Literal["FUTURE", "OPTION"]], date: Optional[str] = None
+    ) -> OptionFutureResponse: ...
+
+    @overload
+    def get_market_hours(
+        self, markets: Sequence[Literal["OPTION", "EQUITY"]], date: Optional[str] = None
+    ) -> OptionEquityResponse: ...
+
+    @overload
+    def get_market_hours(
+        self, markets: Sequence[Literal["EQUITY", "OPTION"]], date: Optional[str] = None
+    ) -> OptionEquityResponse: ...
+
+    @overload
+    def get_market_hours(
+        self,
+        markets: Sequence[Literal["BOND", "EQUITY", "FUTURE"]],
+        date: Optional[str] = None,
+    ) -> BondEquityFutureResponse: ...
+
+    @overload
+    def get_market_hours(
+        self,
+        markets: Sequence[Literal["BOND", "FUTURE", "EQUITY"]],
+        date: Optional[str] = None,
+    ) -> BondEquityFutureResponse: ...
+
+    @overload
+    def get_market_hours(
+        self,
+        markets: Sequence[Literal["FUTURE", "EQUITY", "BOND"]],
+        date: Optional[str] = None,
+    ) -> BondEquityFutureResponse: ...
+
+    @overload
+    def get_market_hours(
+        self,
+        markets: Sequence[Literal["FUTURE", "BOND", "EQUITY"]],
+        date: Optional[str] = None,
+    ) -> BondEquityFutureResponse: ...
+
+    @overload
+    def get_market_hours(
+        self,
+        markets: Sequence[Literal["EQUITY", "BOND", "FUTURE"]],
+        date: Optional[str] = None,
+    ) -> BondEquityFutureResponse: ...
+
+    @overload
+    def get_market_hours(
+        self,
+        markets: Sequence[Literal["EQUITY", "FUTURE", "BOND"]],
+        date: Optional[str] = None,
+    ) -> BondEquityFutureResponse: ...
+
+    @overload
+    def get_market_hours(
+        self,
+        markets: Sequence[Literal["BOND", "EQUITY", "OPTION"]],
+        date: Optional[str] = None,
+    ) -> BondOptionEquityResponse: ...
+
+    @overload
+    def get_market_hours(
+        self,
+        markets: Sequence[Literal["BOND", "OPTION", "EQUITY"]],
+        date: Optional[str] = None,
+    ) -> BondOptionEquityResponse: ...
+
+    @overload
+    def get_market_hours(
+        self,
+        markets: Sequence[Literal["OPTION", "EQUITY", "BOND"]],
+        date: Optional[str] = None,
+    ) -> BondOptionEquityResponse: ...
+
+    @overload
+    def get_market_hours(
+        self,
+        markets: Sequence[Literal["OPTION", "BOND", "EQUITY"]],
+        date: Optional[str] = None,
+    ) -> BondOptionEquityResponse: ...
+
+    @overload
+    def get_market_hours(
+        self,
+        markets: Sequence[Literal["EQUITY", "BOND", "OPTION"]],
+        date: Optional[str] = None,
+    ) -> BondOptionEquityResponse: ...
+
+    @overload
+    def get_market_hours(
+        self,
+        markets: Sequence[Literal["EQUITY", "OPTION", "BOND"]],
+        date: Optional[str] = None,
+    ) -> BondOptionEquityResponse: ...
+
+    @overload
+    def get_market_hours(
+        self,
+        markets: Sequence[Literal["BOND", "FUTURE", "OPTION"]],
+        date: Optional[str] = None,
+    ) -> BondOptionFutureResponse: ...
+
+    @overload
+    def get_market_hours(
+        self,
+        markets: Sequence[Literal["BOND", "OPTION", "FUTURE"]],
+        date: Optional[str] = None,
+    ) -> BondOptionFutureResponse: ...
+
+    @overload
+    def get_market_hours(
+        self,
+        markets: Sequence[Literal["OPTION", "FUTURE", "BOND"]],
+        date: Optional[str] = None,
+    ) -> BondOptionFutureResponse: ...
+
+    @overload
+    def get_market_hours(
+        self,
+        markets: Sequence[Literal["OPTION", "BOND", "FUTURE"]],
+        date: Optional[str] = None,
+    ) -> BondOptionFutureResponse: ...
+
+    @overload
+    def get_market_hours(
+        self,
+        markets: Sequence[Literal["FUTURE", "BOND", "OPTION"]],
+        date: Optional[str] = None,
+    ) -> BondOptionFutureResponse: ...
+
+    @overload
+    def get_market_hours(
+        self,
+        markets: Sequence[Literal["FUTURE", "OPTION", "BOND"]],
+        date: Optional[str] = None,
+    ) -> BondOptionFutureResponse: ...
+
+    @overload
+    def get_market_hours(
+        self,
+        markets: Sequence[Literal["BOND", "FUTURE", "OPTION"]],
+        date: Optional[str] = None,
+    ) -> BondOptionFutureResponse: ...
+
+    @overload
+    def get_market_hours(
+        self,
+        markets: Sequence[Literal["EQUITY", "OPTION", "FUTURE"]],
+        date: Optional[str] = None,
+    ) -> OptionEquityFutureResponse: ...
+
+    @overload
+    def get_market_hours(
+        self,
+        markets: Sequence[Literal["OPTION", "FUTURE", "EQUITY"]],
+        date: Optional[str] = None,
+    ) -> OptionEquityFutureResponse: ...
+
+    @overload
+    def get_market_hours(
+        self,
+        markets: Sequence[Literal["OPTION", "EQUITY", "FUTURE"]],
+        date: Optional[str] = None,
+    ) -> OptionEquityFutureResponse: ...
+
+    @overload
+    def get_market_hours(
+        self,
+        markets: Sequence[Literal["FUTURE", "EQUITY", "OPTION"]],
+        date: Optional[str] = None,
+    ) -> OptionEquityFutureResponse: ...
+
+    @overload
+    def get_market_hours(
+        self,
+        markets: Sequence[Literal["FUTURE", "OPTION", "EQUITY"]],
+        date: Optional[str] = None,
+    ) -> OptionEquityFutureResponse: ...
+
+    @overload
+    def get_market_hours(
+        self,
+        markets: Sequence[Literal["FUTURE", "OPTION", "EQUITY", "BOND"]],
+        date: Optional[str] = None,
+    ) -> AllMarketsResponse: ...
+
+    @overload
+    def get_market_hours(
+        self,
+        markets: Sequence[Literal["FUTURE", "OPTION", "BOND", "EQUITY"]],
+        date: Optional[str] = None,
+    ) -> AllMarketsResponse: ...
+
+    @overload
+    def get_market_hours(
+        self,
+        markets: Sequence[Literal["FUTURE", "BOND", "EQUITY", "OPTION"]],
+        date: Optional[str] = None,
+    ) -> AllMarketsResponse: ...
+
+    @overload
+    def get_market_hours(
+        self,
+        markets: Sequence[Literal["FUTURE", "BOND", "OPTION", "EQUITY"]],
+        date: Optional[str] = None,
+    ) -> AllMarketsResponse: ...
+
+    @overload
+    def get_market_hours(
+        self,
+        markets: Sequence[Literal["FUTURE", "EQUITY", "BOND", "OPTION"]],
+        date: Optional[str] = None,
+    ) -> AllMarketsResponse: ...
+
+    @overload
+    def get_market_hours(
+        self,
+        markets: Sequence[Literal["FUTURE", "EQUITY", "OPTION", "BOND"]],
+        date: Optional[str] = None,
+    ) -> AllMarketsResponse: ...
+
+    @overload
+    def get_market_hours(
+        self,
+        markets: Sequence[Literal["OPTION", "FUTURE", "EQUITY", "BOND"]],
+        date: Optional[str] = None,
+    ) -> AllMarketsResponse: ...
+
+    @overload
+    def get_market_hours(
+        self,
+        markets: Sequence[Literal["OPTION", "FUTURE", "BOND", "EQUITY"]],
+        date: Optional[str] = None,
+    ) -> AllMarketsResponse: ...
+
+    @overload
+    def get_market_hours(
+        self,
+        markets: Sequence[Literal["OPTION", "BOND", "EQUITY", "FUTURE"]],
+        date: Optional[str] = None,
+    ) -> AllMarketsResponse: ...
+
+    @overload
+    def get_market_hours(
+        self,
+        markets: Sequence[Literal["OPTION", "BOND", "FUTURE", "EQUITY"]],
+        date: Optional[str] = None,
+    ) -> AllMarketsResponse: ...
+
+    @overload
+    def get_market_hours(
+        self,
+        markets: Sequence[Literal["OPTION", "EQUITY", "BOND", "FUTURE"]],
+        date: Optional[str] = None,
+    ) -> AllMarketsResponse: ...
+
+    @overload
+    def get_market_hours(
+        self,
+        markets: Sequence[Literal["OPTION", "EQUITY", "FUTURE", "BOND"]],
+        date: Optional[str] = None,
+    ) -> AllMarketsResponse: ...
+
+    @overload
+    def get_market_hours(
+        self,
+        markets: Sequence[Literal["EQUITY", "FUTURE", "OPTION", "BOND"]],
+        date: Optional[str] = None,
+    ) -> AllMarketsResponse: ...
+
+    @overload
+    def get_market_hours(
+        self,
+        markets: Sequence[Literal["EQUITY", "FUTURE", "BOND", "OPTION"]],
+        date: Optional[str] = None,
+    ) -> AllMarketsResponse: ...
+
+    @overload
+    def get_market_hours(
+        self,
+        markets: Sequence[Literal["EQUITY", "BOND", "FUTURE", "OPTION"]],
+        date: Optional[str] = None,
+    ) -> AllMarketsResponse: ...
+
+    @overload
+    def get_market_hours(
+        self,
+        markets: Sequence[Literal["EQUITY", "BOND", "OPTION", "FUTURE"]],
+        date: Optional[str] = None,
+    ) -> AllMarketsResponse: ...
+
+    @overload
+    def get_market_hours(
+        self,
+        markets: Sequence[Literal["EQUITY", "OPTION", "BOND", "FUTURE"]],
+        date: Optional[str] = None,
+    ) -> AllMarketsResponse: ...
+
+    @overload
+    def get_market_hours(
+        self,
+        markets: Sequence[Literal["EQUITY", "OPTION", "FUTURE", "BOND"]],
+        date: Optional[str] = None,
+    ) -> AllMarketsResponse: ...
+
+    @overload
+    def get_market_hours(
+        self,
+        markets: Sequence[Literal["BOND", "FUTURE", "OPTION", "EQUITY"]],
+        date: Optional[str] = None,
+    ) -> AllMarketsResponse: ...
+
+    @overload
+    def get_market_hours(
+        self,
+        markets: Sequence[Literal["BOND", "FUTURE", "EQUITY", "OPTION"]],
+        date: Optional[str] = None,
+    ) -> AllMarketsResponse: ...
+
+    @overload
+    def get_market_hours(
+        self,
+        markets: Sequence[Literal["BOND", "OPTION", "FUTURE", "EQUITY"]],
+        date: Optional[str] = None,
+    ) -> AllMarketsResponse: ...
+
+    @overload
+    def get_market_hours(
+        self,
+        markets: Sequence[Literal["BOND", "OPTION", "EQUITY", "FUTURE"]],
+        date: Optional[str] = None,
+    ) -> AllMarketsResponse: ...
+
+    @overload
+    def get_market_hours(
+        self,
+        markets: Sequence[Literal["BOND", "EQUITY", "OPTION", "FUTURE"]],
+        date: Optional[str] = None,
+    ) -> AllMarketsResponse: ...
+
+    @overload
+    def get_market_hours(
+        self,
+        markets: Sequence[Literal["BOND", "EQUITY", "FUTURE", "OPTION"]],
+        date: Optional[str] = None,
+    ) -> AllMarketsResponse: ...
+
+    def get_market_hours(
+        self, markets: Sequence[str], date: Optional[str] = None
+    ) -> MarketHoursResponse:
         """Returns the hours for a specific market.
 
         Serves as the mechanism to make a request to the "Get Hours for Multiple Markets" and
@@ -1101,8 +1691,8 @@ class BaseSchwabClient:
         # define the endpoint
         endpoint = "marketdata/v1/markets"
 
-        # return the response of the get request.
-        return self._make_request(method="get", endpoint=endpoint, params=params)
+        data = self._make_request(method="get", endpoint=endpoint, params=params)
+        return cast(MarketHoursResponse, data)
 
     def get_movers(
         self,
@@ -1268,7 +1858,9 @@ class BaseSchwabClient:
         # return the response of the get request.
         return self._make_request(method="get", endpoint=endpoint, params=params)
 
-    def get_options_chain(self, option_chain: Union[Dict, OptionChainParams]) -> Dict:
+    def get_options_chain(
+        self, option_chain: Union[Dict, OptionsChainParams]
+    ) -> OptionsChainResponse:
         """Returns Option Chain Data and Quotes.
 
         Get option chain for an optionable Symbol using one of two methods. Either,
@@ -1293,7 +1885,7 @@ class BaseSchwabClient:
         """
 
         # First check if it's an `OptionChain` object.
-        if isinstance(option_chain, OptionChainParams):
+        if isinstance(option_chain, OptionsChainParams):
             # If it is, then grab the params.
             params = option_chain.query_parameters
 
@@ -1305,9 +1897,18 @@ class BaseSchwabClient:
         endpoint = "marketdata/v1/chains"
 
         # return the response of the get request.
-        return self._make_request(method="get", endpoint=endpoint, params=params)
+        return cast(
+            OptionsChainResponse,
+            self._make_request(
+                method="get",
+                endpoint=endpoint,
+                params=params,
+                incl_fetch_time=True,
+                incl_response=True,
+            ),
+        )
 
-    def get_expiration_chain(self, symbol: str) -> Dict:
+    def get_expiration_chain(self, symbol: str) -> ExpirationChainResponse:
         """
         Get Option Expiration (Series) information for an optionable symbol.
         Does not include individual options contracts for the underlying.
@@ -1316,7 +1917,10 @@ class BaseSchwabClient:
 
         endpoint = "marketdata/v1/expirationchain"
 
-        return self._make_request(method="get", endpoint=endpoint, params=params)
+        return cast(
+            ExpirationChainResponse,
+            self._make_request(method="get", endpoint=endpoint, params=params),
+        )
 
     """
     -----------------------------------------------------------
@@ -1324,7 +1928,8 @@ class BaseSchwabClient:
     -----------------------------------------------------------
     """
 
-    def _utcformat(self, dt, timespec="milliseconds"):
+    @staticmethod
+    def _utcformat(dt, timespec="milliseconds"):
         """
         Convert datetime to string in UTC format (YYYY-mm-ddTHH:MM:SS.mmmZ)
         Like Schwab wants.
@@ -1335,43 +1940,55 @@ class BaseSchwabClient:
             iso_str = iso_str[:-6] + "Z"  # Replace the last 6 characters with "Z"
         return iso_str
 
-    def _base64_client_id(self, client_id: str, client_secret: str):
-        """
-        Encode client credentials (client_id:client_secret) using Base64 encoding.
-        Args:
-            client_id (str): The Client ID.
-            client_secret (str): The Client Secret.
-
-        Returns:
-            str: The Base64 encoded string of client_id:client_secret used in the header of access token requests
-        """
-
-        try:
-            api_credentials = f"{client_id}:{client_secret}"
-            encoded_credentials = base64.b64encode(
-                api_credentials.encode("utf-8")
-            ).decode("utf-8")
-            return encoded_credentials
-        except Exception as e:
-            # Log encoding errors
-            logger.error(f"Error encoding client credentials: {e}")
-            return ""
-
     def _extract_redirect_code(self, redirect_url: str) -> str:
         if "code=" in redirect_url and "&session=" in redirect_url:
             try:
                 start_index = redirect_url.index("code=") + len("code=")
                 end_index = redirect_url.index("&session=")
-                # Extract substring between "code=" and "&session="
-                extracted_text = redirect_url[start_index:end_index]
-                # URL decode the extracted text
-                extracted_code = urllib.parse.unquote(extracted_text)
+                # # Extract substring between "code=" and "&session="
+                # extracted_text = redirect_url[start_index:end_index]
+                # # URL decode the extracted text
+                # extracted_code = urllib.parse.unquote(extracted_text)
+                extracted_code = urllib.parse.unquote(
+                    redirect_url[start_index:end_index]
+                )
                 return extracted_code
             except ValueError as ve:
-                logger.error(f"There's a problem with the redirect url 'code' {ve}")
+                self.get_logger_adapter().error(
+                    f"There's a problem with the redirect url 'code' {ve}"
+                )
                 return ""
         else:
-            logger.error(
+            self.get_logger_adapter().error(
                 f"There's a problem with the redirect url 'code' {redirect_url}"
             )
             return ""
+
+    @classmethod
+    def from_credentials(cls, credentials: "SchwabCredentials"):
+        if os.path.exists(credentials.token_path):
+            try:
+                with open(credentials.token_path, "r") as f:
+                    token_data = json.load(f)
+            except json.JSONDecodeError:
+                if not token_data:
+                    os.remove(credentials.token_path)
+        return cls(credentials=credentials)
+
+    @classmethod
+    def from_client_idx(cls, idx: int):
+        """
+        :param idx: account index
+                    must be between 1 and number of schwab accounts
+        """
+        credentials = get_credentials(idx)
+        return cls.from_credentials(credentials)
+
+    def __repr__(self):
+        return "<{}.{}<{}> @ {}>".format(
+            # self.__module__, type(self).__name__, self.idx, hex(id(self))
+            type(self).__module__,
+            type(self).__name__,
+            self.idx,
+            hex(id(self)),
+        )
