@@ -57,6 +57,11 @@ from .utils import (
 if TYPE_CHECKING:
     from kafka.consumer.subscription_state import ConsumerRebalanceListener
 
+__all__ = [
+    "KafkaHandler","ScopedService", "KafkaService",
+    "KafkaConfigManager","API_VERSION", "KAFKA_MESSAGE_VAR",
+]
+
 _P = ParamSpec("_P")
 _RetType = TypeVar("_RetType")
 KAFKA_MESSAGE_VAR = contextvars.ContextVar["ConsumerRecord"]("KAFKA_MESSAGE_VAR")
