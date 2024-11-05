@@ -76,7 +76,6 @@ logger = get_logger(__name__, LOG_LEVEL)
 _T = TypeVar("_T")
 _H_co = TypeVar("_H_co", bound=ResponseHandler, covariant=True)
 _SessionProto = SyncSessionProto[requests.Response]
-# _ModeT = TypeVar("_ModeT", bound=Literal["form", "json"])
 _ModeT = Literal["form", "json"]
 
 
@@ -99,8 +98,6 @@ class BaseSchwabClient(ClassNameLoggerMixin):
         "%(asctime)s %(levelname)s %(name)s<%(idx)d> %(message)s", defaults={"idx": 0}
     )
     PROPAGATE = False
-    # FH_TYPE = "RotatingFileHandler"
-    # FH_TYPE_KWARGS = {"maxBytes": 1_048_576, "backupCount": 500_000}
 
     _DEFAULT_SESSION_FACTORY: ClassVar[SessionFactoryT] = requests.Session
     config: ClassVar[ConfigDict] = {
