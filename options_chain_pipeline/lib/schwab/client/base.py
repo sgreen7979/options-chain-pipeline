@@ -99,6 +99,8 @@ class BaseSchwabClient(ClassNameLoggerMixin):
         "%(asctime)s %(levelname)s %(name)s<%(idx)d> %(message)s", defaults={"idx": 0}
     )
     PROPAGATE = False
+    # FH_TYPE = "RotatingFileHandler"
+    # FH_TYPE_KWARGS = {"maxBytes": 1_048_576, "backupCount": 500_000}
 
     _DEFAULT_SESSION_FACTORY: ClassVar[SessionFactoryT] = requests.Session
     config: ClassVar[ConfigDict] = {
@@ -219,6 +221,14 @@ class BaseSchwabClient(ClassNameLoggerMixin):
             self.request_session = self._sessionFactory()
             self.request_session = None
 
+        # if session_factory is None:
+        #     self._sessionFactory = self.__class__._DEFAULT_SESSION_FACTORY
+        #     self.request_session = self._sessionFactory()
+        #     # self.request_session.verify = True
+        # else:
+        #     self._sessionFactory = session_factory
+        #     self.request_session = self._sessionFactory()
+
         self._response_handler: ResponseHandler = response_handler or ResponseHandler(
             self
         )
@@ -329,7 +339,6 @@ class BaseSchwabClient(ClassNameLoggerMixin):
 
     def get_account_number_hash_values(self) -> dict:
         endpoint = "trader/v1/accounts/accountNumbers"
-        # make the request.
         return self._make_request(method="get", endpoint=endpoint)
 
     def grab_access_token(self) -> Optional[dict]:
@@ -345,12 +354,10 @@ class BaseSchwabClient(ClassNameLoggerMixin):
         dict or None: The token dictionary if successful, None otherwise.
         """
         try:
-            # Build the parameters of the request
             data = {
                 "grant_type": "refresh_token",
                 "refresh_token": self.state["refresh_token"],
             }
-            # Make the request
             response = requests.post(
                 url=self.config["token_endpoint"],
                 headers=self._create_request_headers(is_access_token_request=True),
@@ -364,7 +371,6 @@ class BaseSchwabClient(ClassNameLoggerMixin):
                     token_dict=response.json(), refresh_token_from_oauth=False
                 )
             else:
-                # Log the error
                 self.get_logger_adapter().error(
                     f"Failed to refresh access token. Status code: {response.status_code}, Reason: {response.text}"
                 )
@@ -374,7 +380,6 @@ class BaseSchwabClient(ClassNameLoggerMixin):
                     )
                     self.oauth()
         except requests.RequestException as e:
-            # Log the exception
             self.get_logger_adapter().error(f"Failed to refresh access token: {e}")
             raise
 
@@ -724,9 +729,7 @@ class BaseSchwabClient(ClassNameLoggerMixin):
     ) -> Dict:
         params = {}
         instruments = self._prepare_arguments_list(parameter_list=instruments)
-        # _prepared_query["instruments"] = instruments
 
-        # Prepare fields list if provided.
         if fields:
             fields = self._prepare_arguments_list(parameter_list=fields)
 
@@ -736,9 +739,7 @@ class BaseSchwabClient(ClassNameLoggerMixin):
             params["fields"] = fields
         params["indicative"] = indicative  # type: ignore
 
-        # Define the endpoint.
         endpoint = "marketdata/v1/quotes"
-
         return {
             "endpoint": endpoint,
             "params": params,
@@ -787,10 +788,7 @@ class BaseSchwabClient(ClassNameLoggerMixin):
             params["fields"] = fields
         params["indicative"] = indicative  # type: ignore
 
-        # Define the endpoint.
         endpoint = "marketdata/v1/quotes"
-
-        # Return the response of the get request.
         return self._make_request(
             method="get", endpoint=endpoint, params=params, multi=len(instruments)
         )
@@ -837,7 +835,6 @@ class BaseSchwabClient(ClassNameLoggerMixin):
                 dt.datetime.now() - dt.timedelta(days=60)
             )
 
-        # Define the payload
         params = {
             "maxResults": max_results,
             "fromEnteredTime": from_entered_time,
@@ -845,15 +842,12 @@ class BaseSchwabClient(ClassNameLoggerMixin):
             "status": status,
         }
 
-        # Define the endpoint
-
         endpoint = (
             "trader/v1/orders"
             if not account
             else f"trader/v1/accounts/{account}/orders"
         )  # All linked accounts or specific account
 
-        # Make the request
         return self._make_request(method="get", endpoint=endpoint, params=params)
 
     def get_order(self, account: str, order_id: str) -> Dict:
@@ -877,9 +871,7 @@ class BaseSchwabClient(ClassNameLoggerMixin):
         {Dict} -- A response dictionary.
         """
 
-        # Define the endpoint
         endpoint = f"trader/v1/accounts/{account}/orders/{order_id}"
-        # Make the request
         return self._make_request(method="get", endpoint=endpoint)
 
     def get_accounts(
@@ -936,9 +928,7 @@ class BaseSchwabClient(ClassNameLoggerMixin):
         {Dict} -- A response dictionary.
         """
 
-        # define the endpoint
         endpoint = f"trader/v1/accounts/{account}/orders/{order_id}"
-
         return self._make_request(
             method="delete", endpoint=endpoint, order_details=True
         )
@@ -998,9 +988,7 @@ class BaseSchwabClient(ClassNameLoggerMixin):
         if isinstance(order, Order):
             order = order._grab_order()
 
-        # Make the request
         endpoint = f"trader/v1/accounts/{account}/orders/{order_id}"
-
         return self._make_request(
             method="put",
             endpoint=endpoint,
@@ -1108,9 +1096,7 @@ class BaseSchwabClient(ClassNameLoggerMixin):
         ----
             Perferences dictionary
         """
-        # define the endpoint
         endpoint = "trader/v1//userPreference"
-        # return the response of the get request.
         resp_data = self._make_request(method="get", endpoint=endpoint)
         return cast(UserPreferencesResponse, resp_data)
 
@@ -1174,13 +1160,8 @@ class BaseSchwabClient(ClassNameLoggerMixin):
                 )
         """
 
-        # build the params dictionary
         params = {"symbol": symbol, "projection": projection}
-
-        # define the endpoint
         endpoint = "marketdata/v1/instruments"
-
-        # return the response of the get request.
         return self._make_request(method="get", endpoint=endpoint, params=params)
 
     def get_instruments(self, cusip_id: str) -> Dict:
@@ -1203,10 +1184,7 @@ class BaseSchwabClient(ClassNameLoggerMixin):
             )
         """
 
-        # define the endpoint
         endpoint = f"marketdata/v1/instruments/{cusip_id}"
-
-        # return the response of the get request.
         return self._make_request(method="get", endpoint=endpoint)
 
     @overload
@@ -1654,15 +1632,10 @@ class BaseSchwabClient(ClassNameLoggerMixin):
 
         # because we have a list argument, prep it for the request.
         markets = self._prepare_arguments_list(parameter_list=markets)
-
-        # build the params dictionary
         params = {"markets": markets, "date": date}
-
-        # define the endpoint
         endpoint = "marketdata/v1/markets"
-
-        data = self._make_request(method="get", endpoint=endpoint, params=params)
-        return cast(MarketHoursResponse, data)
+        resp_data = self._make_request(method="get", endpoint=endpoint, params=params)
+        return cast(MarketHoursResponse, resp_data)
 
     def get_movers(
         self,
@@ -1702,13 +1675,8 @@ class BaseSchwabClient(ClassNameLoggerMixin):
                 )
         """
 
-        # build the params dictionary
         params = {"sort": sort, "frequency": frequency}
-
-        # define the endpoint
         endpoint = f"marketdata/v1/movers/{symbol_id}"
-
-        # return the response of the get request.
         return self._make_request(method="get", endpoint=endpoint, params=params)
 
     def get_price_history(
@@ -1822,10 +1790,7 @@ class BaseSchwabClient(ClassNameLoggerMixin):
             "needPreviousClose": need_previous_close,
         }
 
-        # define the endpoint
         endpoint = "marketdata/v1/pricehistory"
-
-        # return the response of the get request.
         return self._make_request(method="get", endpoint=endpoint, params=params)
 
     def get_options_chain(
@@ -1854,29 +1819,20 @@ class BaseSchwabClient(ClassNameLoggerMixin):
             )
         """
 
-        # First check if it's an `OptionChain` object.
         if isinstance(option_chain, OptionsChainParams):
-            # If it is, then grab the params.
             params = option_chain.query_parameters
-
         else:
-            # Otherwise just take the raw dictionary.
             params = option_chain
 
-        # define the endpoint
         endpoint = "marketdata/v1/chains"
-
-        # return the response of the get request.
-        return cast(
-            OptionsChainResponse,
-            self._make_request(
-                method="get",
-                endpoint=endpoint,
-                params=params,
-                incl_fetch_time=True,
-                incl_response=True,
-            ),
+        resp_data = self._make_request(
+            method="get",
+            endpoint=endpoint,
+            params=params,
+            incl_fetch_time=True,
+            incl_response=True,
         )
+        return cast(OptionsChainResponse, resp_data)
 
     def get_expiration_chain(self, symbol: str) -> ExpirationChainResponse:
         """
@@ -1886,11 +1842,8 @@ class BaseSchwabClient(ClassNameLoggerMixin):
         params = {"symbol": symbol}
 
         endpoint = "marketdata/v1/expirationchain"
-
-        return cast(
-            ExpirationChainResponse,
-            self._make_request(method="get", endpoint=endpoint, params=params),
-        )
+        resp_data = self._make_request(method="get", endpoint=endpoint, params=params),
+        return cast(ExpirationChainResponse, resp_data)
 
     """
     -----------------------------------------------------------
