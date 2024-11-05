@@ -346,7 +346,8 @@ class ScopedService:
             self.started() and not self.stopped()
         ), "Cannot detach an inactive scoped service"
         assert not self._detached, "Cannot detach an already detached scoped service"
-        return self._service._detach_scoped_service(self)
+        self._service._detach_scoped_service(self)
+        self._detached = True
 
 
 class KafkaConfigManager(ClassNameLoggerMixin):
