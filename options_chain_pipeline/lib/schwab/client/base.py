@@ -315,38 +315,16 @@ class BaseSchwabClient(ClassNameLoggerMixin):
     """
 
     def _requires_oauth(self) -> bool:
-        if (
-            "refresh_token_expires_at" in self.state
-            and "access_token_expires_at" in self.state
-        ):
-            # should be true if _token_save already ran as part of oauth flow
-
-            # Grab the refresh_token expire Time.
+        if "refresh_token_expires_at" in self.state:
             refresh_token_exp = self.state["refresh_token_expires_at"]
-            assert isinstance(refresh_token_exp, float)
             refresh_token_ts = dt.datetime.fromtimestamp(refresh_token_exp)
-            # Grab the Expire Threshold
             refresh_token_exp_threshold = refresh_token_ts - dt.timedelta(days=1)
-            # Convert Thresholds to Seconds.
             refresh_token_exp_threshold = refresh_token_exp_threshold.timestamp()
-            # Check the Refresh Token first, is expired or expiring soon?
             self.get_logger_adapter().debug(
                 f"The refresh token will expire at: {self.state['refresh_token_expires_at_date']}"
             )
             if dt.datetime.now().timestamp() > refresh_token_exp_threshold:
                 return True
-            # Grab the access_token expire Time.
-            access_token_exp = self.state["access_token_expires_at"]
-            assert isinstance(access_token_exp, float)
-            access_token_ts = dt.datetime.fromtimestamp(access_token_exp)
-            # Grab the Expire Thresholds.
-            access_token_exp_threshold = access_token_ts - dt.timedelta(minutes=5)
-            # Convert Thresholds to Seconds.
-            access_token_exp_threshold = access_token_exp_threshold.timestamp()
-            # See if we need a new Access Token.
-            if dt.datetime.now().timestamp() > access_token_exp_threshold:
-                return True
-
         return False
 
     def get_account_number_hash_values(self) -> dict:
