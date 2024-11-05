@@ -661,10 +661,10 @@ class IncrementalSubscriptionHandler:
     def _subscribe(
         self, consumer: KafkaConsumer, *topics: str, pattern=None, listener=None
     ):
-        prev_subcs = self._get_current_subscriptions(consumer)
+        initial_subs = self._get_current_subscriptions(consumer)
         consumer.subscribe(topics, pattern=pattern, listener=listener)
         self._service.get_logger().info(
-            f"Consumer initially subscribed to {prev_subcs} and is "
+            f"Consumer initially subscribed to {initial_subs} and is "
             f"now subscribed to {self._get_current_subscriptions(consumer)}"
         )
 
