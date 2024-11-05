@@ -1,6 +1,7 @@
 # Adapted from https://github.com/areed1192/td-ameritrade-python-api by Alex Reed
 import asyncio
 import datetime as dt
+from functools import lru_cache
 import json
 import os
 import pathlib
@@ -232,6 +233,7 @@ class BaseSchwabClient(ClassNameLoggerMixin):
             self
         )
 
+    @lru_cache(maxsize=1)
     def get_logger_adapter(self):
         return LoggerAdapter(self.__class__.get_logger(), extra={"idx": self.idx})
 
